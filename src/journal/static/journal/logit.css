@@ -43,8 +43,7 @@ code { background: var(--surface-3); padding: .05rem .35rem; border-radius: 4px;
 .nav { position: relative; display: flex; gap: .15rem; flex: 1; height: 100%; align-items: center; }
 .nav a { position: relative; z-index: 1; color: var(--muted); padding: .4rem .75rem; border-radius: var(--radius-sm); font-size: .92rem; font-weight: 500; white-space: nowrap; }
 .nav a:hover, .nav a.active { color: var(--text); }
-.slider { position: absolute; left: 0; pointer-events: none; opacity: 0;
-  transition: transform var(--mid) var(--ease), width var(--mid) var(--ease), top var(--mid) var(--ease), opacity var(--fast); }
+.slider { position: absolute; left: 0; pointer-events: none; opacity: 0; transform-origin: 0 0; transition: opacity var(--fast); }  /* déplacement animé en JS (transform seul) */
 .slider.ready { opacity: 1; }
 .nav .slider { bottom: 0; height: 2px; background: var(--accent); border-radius: 2px; box-shadow: 0 0 12px var(--accent-glow); }
 .nav .slider-bg { top: 50%; bottom: auto; height: 32px; margin-top: -16px; background: var(--surface-2); border-radius: var(--radius-sm); box-shadow: none; }
@@ -142,7 +141,7 @@ select { appearance: none; padding-right: 2rem;
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
 .segmented label:has(input:checked) { color: #fff; }
 .segmented label:has(input:focus-visible) { outline: 2px solid var(--accent-2); outline-offset: 1px; }
-.segmented .slider { top: 3px; height: calc(100% - 6px); background: var(--accent); border-radius: 5px; box-shadow: 0 2px 12px -4px var(--accent-glow); }
+.segmented .slider { top: 0; height: calc(100% - 6px); background: var(--accent); border-radius: 5px; box-shadow: 0 2px 12px -4px var(--accent-glow); }
 .segmented:not(.js) label:has(input:checked) { background: var(--accent); }
 
 /* Sélection d'éléments en puces groupées */
@@ -285,7 +284,8 @@ a.stat:hover::before { opacity: 1; }
 .skeleton { height: 110px; border-radius: var(--radius-sm); background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2));
   background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
-.entry.enter { animation: entry-in var(--mid) var(--ease) both; }
+/* Apparition progressive au chargement et après filtrage (classe posée par logit.js) */
+.enter { animation: entry-in var(--mid) var(--ease) both; }
 @keyframes entry-in { from { opacity: 0; transform: translateY(8px); } }
 .empty-state { text-align: center; padding: 2.5rem 1rem; color: var(--muted); border: 1px dashed var(--border-strong); border-radius: var(--radius); }
 

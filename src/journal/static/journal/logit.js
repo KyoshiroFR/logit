@@ -12,24 +12,28 @@ function slider(container, itemSelector, isActive, classes = "slider") {
   bar.setAttribute("aria-hidden", "true");
   container.appendChild(bar);
   container.classList.add("js");
-  const moveTo = (item) => {
+  const vertical = container.classList.contains("segmented");  // un groupe peut passer sur plusieurs lignes
+  let last = null;  // position affichée : { x, y, w }
+  // Seul transform est animé : la largeur finale est posée d'un coup, et l'animation part
+  // de l'ancienne position avec un étirement (scaleX) qui se résorbe à l'arrivée.
+  const moveTo = (item, animate = true) => {
     if (!item) { bar.classList.remove("ready"); return; }
-    bar.style.width = `${item.offsetWidth}px`;
-    bar.style.transform = `translateX(${item.offsetLeft}px)`;
-    if (container.classList.contains("segmented")) {  // un groupe peut passer sur plusieurs lignes
-      bar.style.top = `${item.offsetTop}px`;
-      bar.style.height = `${item.offsetHeight}px`;
+    const next = { x: item.offsetLeft, y: vertical ? item.offsetTop : 0, w: item.offsetWidth };
+    bar.style.width = `${next.w}px`;
+    if (vertical) bar.style.height = `${item.offsetHeight}px`;
+    bar.style.transform = `translate(${next.x}px, ${next.y}px)`;
+    if (animate && last && !reduceMotion && bar.classList.contains("ready") && (last.x !== next.x || last.y !== next.y || last.w !== next.w)) {
+      bar.animate([
+        { transform: `translate(${last.x}px, ${last.y}px) scaleX(${last.w / next.w})` },
+        { transform: `translate(${next.x}px, ${next.y}px)` },
+      ], { duration: 260, easing: "cubic-bezier(.22, .8, .24, 1)" });
     }
+    last = next;
     bar.classList.add("ready");
   };
-  const reset = () => moveTo(items.find(isActive));
+  const reset = (animate = true) => moveTo(items.find(isActive), animate);
   // Premier placement sans animation : l'indicateur apparaît directement sous l'élément actif.
-  const place = () => {
-    bar.style.transition = "none";
-    reset();
-    bar.getBoundingClientRect();
-    requestAnimationFrame(() => { bar.style.transition = ""; });
-  };
+  const place = () => reset(false);
   return { bar, items, moveTo, reset, place };
 }
 
@@ -79,7 +83,7 @@ function initNav() {
     a.addEventListener("focus", () => { hover.moveTo(a); line.moveTo(a); });
   });
   nav.addEventListener("mouseleave", () => { hover.bar.classList.remove("ready"); line.reset(); });
-  window.addEventListener("resize", () => line.reset());
+  window.addEventListener("resize", () => line.reset(false));
 }
 
 function initSegmented(root = document) {
@@ -90,7 +94,19 @@ function initSegmented(root = document) {
     if (!s) return;
     s.place();
     group.addEventListener("change", () => s.reset());
-    window.addEventListener("resize", () => s.reset());
+    window.addEventListener("resize", () => s.reset(false));
+  });
+}
+
+// ── Apparition progressive : les blocs de la page arrivent en cascade au chargement ──────
+const REVEAL = ["main > .page-head", ".stat", "main > .card", "main > section", "main > .grid-2 > *", "main > form > .form-section",
+  "main > form > details", ".filters", "#results .entry", ".narrow > .card", ".medium.card"].join(", ");
+function reveal(elements) {
+  if (reduceMotion) return;
+  Array.from(elements).slice(0, 12).forEach((el, i) => {
+    el.style.animationDelay = `${i * 30}ms`;
+    el.classList.add("enter");
+    el.addEventListener("animationend", () => { el.classList.remove("enter"); el.style.animationDelay = ""; }, { once: true });
   });
 }
 
@@ -130,12 +146,7 @@ function initLiveFilters() {
       .then((html) => {
         results.innerHTML = html;
         results.classList.remove("loading");
-        if (!reduceMotion) {
-          results.querySelectorAll(".entry").forEach((entry, i) => {
-            entry.style.animationDelay = `${Math.min(i, 8) * 25}ms`;
-            entry.classList.add("enter");
-          });
-        }
+        reveal(results.querySelectorAll(".entry"));
         initEntries(results);
         if (push) history.replaceState(null, "", url);
       })
@@ -279,6 +290,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initNav();
   initSegmented();
   initStats();
+  reveal(document.querySelectorAll(REVEAL));
   initLiveFilters();
   initEntries();
   initForm();
