@@ -166,4 +166,4 @@ Une faille de sécurité se signale en privé : voir [SECURITY.md](SECURITY.md).
 
 ## Licence
 
-LogIT est distribué sous licence [MIT](LICENSE).
+LogIT est distribué sous licence [Apache 2.0](LICENSE) : tu peux l’utiliser, le modifier et le redistribuer librement, à condition de conserver le fichier [NOTICE](NOTICE) qui en indique l’auteur, et de signaler tes modifications. La licence n’accorde aucun droit sur le nom « LogIT ».
