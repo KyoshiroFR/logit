@@ -475,6 +475,16 @@ class InterfaceTests(Base):
         self.assertContains(self.get(f"/fiches/{intervention.pk}/"), "Correctif")
         self.assertEqual(verify(), [])
 
+    def test_integrite_affiche_le_resultat_et_ce_qui_a_ete_verifie(self):
+        self.post("/fiches/nouvelle/", self.fiche(attachments=[png()]))
+        self.client.force_login(make_user("chef", role="admin"))
+        self.assertNotContains(self.get("/admin/integrite/"), "Contrôlé par cette vérification")
+        response = self.post("/admin/integrite/", {})
+        self.assertContains(response, "Aucune anomalie")
+        self.assertEqual([n for n, _, _ in response.context["counts"]],
+                         [1, 1, 1, AuditEvent.objects.count()])
+        self.assertTrue(AuditEvent.objects.filter(action="integrity_checked").exists())
+
     def test_csp_stricte_conservee(self):
         csp = self.get("/")["Content-Security-Policy"]
         self.assertIn("script-src 'self'", csp)

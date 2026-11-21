@@ -14,7 +14,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
 from . import chain
-from .models import AuditEvent, Element
+from .models import Attachment, AuditEvent, Element, Intervention, Version
 from .permissions import CONTRIBUTOR, READER, ROLES, admin_required, role_of
 from .security import profile_of
 
@@ -195,7 +195,12 @@ def audit(request):
 @admin_required
 def integrity(request):
     problems = chain.verify() if request.method == "POST" else None
+    counts = None
     if problems is not None:
         chain.record_event("integrity_checked", actor=request.user, details={"anomalies": len(problems)},
                            request=request)
-    return render(request, "journal/admin/integrity.html", {"problems": problems})
+        # Ce qui vient d'être vérifié, affiché avec le résultat.
+        counts = [(Intervention.objects.count(), "fiche", "fiches"), (Version.objects.count(), "version", "versions"),
+                  (Attachment.objects.count(), "capture", "captures"),
+                  (AuditEvent.objects.count(), "événement du journal", "événements du journal")]
+    return render(request, "journal/admin/integrity.html", {"problems": problems, "counts": counts})

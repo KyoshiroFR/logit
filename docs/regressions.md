@@ -31,6 +31,7 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
 | La chaîne d'empreintes révèle une fiche falsifiée directement dans la base. | `DatabaseProtectionTests.test_la_chaine_revele_une_falsification` |
 | Une capture est immuable ; une image remplacée dans la base est détectée. | `CaptureTests.test_capture_immuable_et_falsification_detectee` |
 | Le calcul d'empreinte des fiches existantes ne change pas : une nouvelle clé n'est ajoutée que si elle est renseignée. | `CaptureTests.test_empreintes_2_0_inchangees_sans_capture_ni_retour`, `InterfaceTests.test_formulaire_elements_par_domaine_et_categorie_tracee` |
+| La page Intégrité affiche le résultat et ce qui a été contrôlé (fiches, versions, captures, événements) ; chaque vérification est inscrite au journal. | `InterfaceTests.test_integrite_affiche_le_resultat_et_ce_qui_a_ete_verifie` |
 | Le journal de sécurité reste intègre après la création de l'admin initial. | `AuthenticationTests.test_bootstrap_admin_et_journal_integre` |
 
 ## Captures

@@ -128,6 +128,18 @@ function initStats() {
   });
 }
 
+// ── Intégrité : le bouton indique que le calcul est en cours ──────────────────────────
+function initIntegrity() {
+  const form = document.querySelector("[data-integrity]");
+  if (!form) return;
+  form.addEventListener("submit", () => {
+    const button = form.querySelector(".integrity-run");
+    button.classList.add("loading");
+    button.setAttribute("aria-busy", "true");
+    button.querySelector(".label-text").textContent = "Vérification…";
+  });
+}
+
 // ── Registre : filtrage dynamique sans rechargement ───────────────────────────────────
 function initLiveFilters() {
   const form = document.getElementById("filters");
@@ -290,6 +302,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initNav();
   initSegmented();
   initStats();
+  initIntegrity();
   reveal(document.querySelectorAll(REVEAL));
   initLiveFilters();
   initEntries();
