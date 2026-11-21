@@ -83,7 +83,8 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
 À vérifier à la main quand on modifie le code concerné.
 
 - **Aucun attribut `style=""` dans les gabarits.** La CSP l'interdit, mais le test ne contrôle que l'en-tête : un `style=""` serait seulement ignoré par le navigateur, sans erreur. Contrôle : `grep -rn 'style=' src/journal/templates` doit être vide.
-- **Interactions JavaScript** (`logit.js`) : indicateurs glissants, filtrage sans rechargement, raccourci `/`, collage de capture avec Ctrl+V, fenêtre de signalement. Tout doit aussi fonctionner sans JavaScript.
+- **Interactions JavaScript** (`logit.js`) : menu repliable de la barre du haut, indicateurs glissants, apparition progressive, compteurs des chiffres clés, filtrage sans rechargement, raccourci `/`, collage de capture avec Ctrl+V, fenêtre de signalement, état « Vérification… » de la page Intégrité. Tout doit aussi fonctionner sans JavaScript.
+- **Code TOTP en 6 cases** : le vrai champ reste le seul à recevoir la saisie (collage, remplissage automatique) ; il redevient un champ normal pour un code de secours ; un code complet est envoyé seul, mais jamais au rechargement après un code refusé (sinon envoi en boucle et verrouillage du compte).
 - **`prefers-reduced-motion`** coupe toutes les animations (fin de `logit.css`).
 - **Session de 8 heures**, fermée avec le navigateur ; mot de passe de 12 caractères minimum (`config/settings.py`).
 - **Adresse IP du client** lue dans `X-Real-IP` (posé par le proxy de LogIT), sinon `REMOTE_ADDR` (`chain.py`).

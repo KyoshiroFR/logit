@@ -215,6 +215,23 @@ div.stat { cursor: default; }
   animation: pop 320ms var(--ease) both; }
 .integrity-check svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 @keyframes pop { from { opacity: 0; transform: scale(.6); } }
+/* ── Code TOTP en 6 cases (le vrai champ, transparent, couvre les cases) ── */
+.otp { position: relative; max-width: 21rem; }
+.otp-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) .1rem repeat(3, minmax(0, 1fr)); gap: .45rem; }
+.otp-cells span { position: relative; display: grid; place-items: center; aspect-ratio: 1 / 1.15; border: 1px solid var(--border-strong); border-radius: 10px;
+  background: var(--bg-2); font: 650 1.45rem var(--mono); color: var(--text); transition: border-color var(--fast) var(--ease); }
+.otp-cells span:nth-child(4) { grid-column: 5; }  /* deux groupes de 3, séparés par une colonne vide */
+.otp:not(.plain) > input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: text; }
+.otp:focus-within .otp-cells span.current { border-color: var(--accent); }
+.otp:has(input:focus-visible) .otp-cells span.current { box-shadow: 0 0 0 3px var(--accent-soft); }
+.otp:focus-within .otp-cells span.current:empty::after { content: ""; width: 2px; height: 1.3rem; border-radius: 2px; background: var(--accent-2); animation: blink 1s steps(1) infinite; }
+.otp-cells span.pop { animation: digit-in 200ms var(--ease); }
+.otp.plain .otp-cells { display: none; }
+.field.has-error .otp-cells { animation: shake 320ms var(--ease); }
+.field.has-error .otp-cells span { border-color: rgba(255, 93, 93, .55); }
+@keyframes digit-in { from { opacity: 0; transform: translateY(6px) scale(.85); } }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
 .integrity-scope { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin: 0 0 .6rem; }
 @media (max-width: 560px) { .pulse-strip { gap: .5rem; } .stat { padding: .8rem .8rem .85rem; border-radius: 12px; } .stat strong { font-size: 1.75rem; } .stat span { font-size: .78rem; } }
 

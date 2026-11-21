@@ -140,6 +140,62 @@ function initIntegrity() {
   });
 }
 
+// ── Code TOTP : 6 cases au-dessus du vrai champ, qui reste le seul à recevoir la saisie ───
+// Le champ garde son libellé, le collage et le remplissage automatique (one-time-code).
+// Dès qu'on tape autre chose que des chiffres (code de secours), il redevient un champ normal.
+function initOtp() {
+  document.querySelectorAll('input[autocomplete="one-time-code"]').forEach((input) => {
+    const box = document.createElement("div");
+    box.className = "otp";
+    const cells = document.createElement("div");
+    cells.className = "otp-cells";
+    cells.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < 6; i += 1) cells.appendChild(document.createElement("span"));
+    const hadFocus = input.autofocus || document.activeElement === input;
+    input.before(box);
+    box.append(cells, input);
+    if (hadFocus) input.focus();  // déplacer le champ peut lui faire perdre l'autofocus
+    const form = input.form;
+    const submit = form.querySelector("button[type=submit]");
+    const plainButton = form.querySelector("[data-otp-plain]");
+    // Code refusé : le champ repart vide pour une nouvelle saisie. Une valeur présente au chargement
+    // n'est de toute façon jamais renvoyée seule.
+    if (input.closest(".has-error")) input.value = "";
+    let shown = input.value.replace(/\s/g, "").slice(0, 6);
+    const setPlain = (plain) => {
+      box.classList.toggle("plain", plain);
+      input.inputMode = plain ? "text" : "numeric";
+      if (plainButton) plainButton.hidden = plain;
+    };
+    const render = () => {
+      const raw = input.value;
+      if (!box.classList.contains("plain") && /^[\d\s]*$/.test(raw)) {
+        const digits = raw.replace(/\s/g, "").slice(0, 6);
+        if (digits !== raw) input.value = digits;
+        Array.from(cells.children).forEach((cell, i) => {
+          cell.textContent = digits[i] || "";
+          cell.classList.toggle("current", i === Math.min(digits.length, 5));
+          if (i >= shown.length && i < digits.length && !reduceMotion) {  // chiffre qui vient d'arriver
+            cell.classList.remove("pop"); void cell.offsetWidth; cell.classList.add("pop");
+          }
+        });
+        if (digits.length === 6 && shown.length < 6) {  // code complet : envoi direct
+          submit.textContent = "Vérification…";
+          submit.setAttribute("aria-busy", "true");
+          form.requestSubmit();
+        }
+        shown = digits;
+      } else {
+        setPlain(true);
+      }
+    };
+    plainButton?.addEventListener("click", () => { setPlain(true); input.focus(); });
+    input.addEventListener("input", render);
+    setPlain(false);
+    render();
+  });
+}
+
 // ── Registre : filtrage dynamique sans rechargement ───────────────────────────────────
 function initLiveFilters() {
   const form = document.getElementById("filters");
@@ -303,6 +359,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initSegmented();
   initStats();
   initIntegrity();
+  initOtp();
   reveal(document.querySelectorAll(REVEAL));
   initLiveFilters();
   initEntries();
