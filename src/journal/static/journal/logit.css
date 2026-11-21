@@ -50,8 +50,38 @@ code { background: var(--surface-3); padding: .05rem .35rem; border-radius: 4px;
 .nav .slider-bg { top: 50%; bottom: auto; height: 32px; margin-top: -16px; background: var(--surface-2); border-radius: var(--radius-sm); box-shadow: none; }
 .badge { display: inline-grid; place-items: center; min-width: 1.25rem; height: 1.25rem; padding: 0 .35rem; margin-left: .3rem; border-radius: 999px;
   background: var(--accent); color: #fff; font-size: .72rem; font-weight: 700; }
-.user { display: flex; gap: 1rem; align-items: center; font-size: .9rem; color: var(--muted); }
+.user { display: flex; gap: 1rem; align-items: center; font-size: .9rem; color: var(--muted); flex: none; white-space: nowrap; }
 .user a { color: var(--text-2); }
+
+/* Barre trop étroite : sans JavaScript, les rubriques défilent dans la barre sans élargir la page ;
+   avec JavaScript, elles passent dans un menu qui s'ouvre sous la barre (classe .compact). */
+.topbar-menu { display: contents; }
+.nav { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.nav::-webkit-scrollbar { display: none; }
+.menu-toggle { display: none; margin-left: auto; gap: .55rem; background: transparent; padding: .4rem .7rem; }
+.burger { display: inline-grid; gap: 4px; width: 16px; }
+.burger i { display: block; height: 2px; border-radius: 2px; background: currentColor; transition: transform var(--mid) var(--ease), opacity var(--fast) var(--ease); }
+.topbar.compact .menu-toggle { display: inline-flex; }
+.topbar.compact .topbar-menu { position: absolute; top: 100%; left: 0; right: 0; display: flex; flex-direction: column; gap: .75rem;
+  padding: .75rem 1.5rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: 0 18px 40px -20px rgba(0, 0, 0, .8);
+  opacity: 0; transform: translateY(-8px); visibility: hidden;
+  transition: opacity var(--mid) var(--ease), transform var(--mid) var(--ease), visibility 0s linear var(--mid); }
+.topbar.compact.open .topbar-menu { opacity: 1; transform: none; visibility: visible; transition-delay: 0s; }
+.topbar.compact .nav { flex-direction: column; align-items: stretch; height: auto; overflow: visible; gap: 2px; }
+.topbar.compact .nav a { padding: .6rem .75rem; }
+.topbar.compact .nav a.active { background: var(--surface-2); color: var(--text); }
+.topbar.compact .nav .slider { display: none; }
+.topbar.compact .user { flex-wrap: wrap; white-space: normal; padding-top: .75rem; border-top: 1px solid var(--border); }
+.topbar.compact .report-bug span { display: inline; }
+.topbar.measuring .topbar-menu { transition: none; }  /* pas de fondu quand on bascule de mode */
+@media (max-width: 1020px) {  /* sans JavaScript : rubriques sur une seconde ligne défilante */
+  html:not(.js) .topbar .inner { flex-wrap: wrap; height: auto; padding-top: .45rem; }
+  html:not(.js) .nav { order: 3; flex-basis: 100%; height: 44px; }
+  html:not(.js) .user { flex: 1 1 auto; flex-wrap: wrap; justify-content: flex-end; white-space: normal; gap: .4rem 1rem; }
+}
+.topbar.open .burger i:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.topbar.open .burger i:nth-child(2) { opacity: 0; }
+.topbar.open .burger i:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 .inline { display: inline; margin: 0; }
 
 main { max-width: 1280px; margin: 0 auto; padding: 1.75rem 1.5rem 5rem; }

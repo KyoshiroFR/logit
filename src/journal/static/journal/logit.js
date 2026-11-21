@@ -1,5 +1,6 @@
 // LogIT 2.2 — interactions. Tout fonctionne sans JavaScript ; ce fichier ajoute la fluidité.
 "use strict";
+document.documentElement.classList.add("js");  // les règles « sans JavaScript » de logit.css ne s'appliquent plus
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ── Surbrillance glissante : barre du haut et groupes segmentés ─────────────────────────
@@ -30,6 +31,39 @@ function slider(container, itemSelector, isActive, classes = "slider") {
     requestAnimationFrame(() => { bar.style.transition = ""; });
   };
   return { bar, items, moveTo, reset, place };
+}
+
+// ── Barre du haut : menu repliable quand les rubriques ne tiennent plus sur une ligne ─────
+function initMenu() {
+  const bar = document.querySelector(".topbar");
+  const toggle = bar?.querySelector(".menu-toggle");
+  const nav = bar?.querySelector(".nav");
+  if (!toggle || !nav) return;
+  toggle.hidden = false;
+  const setOpen = (open) => {
+    bar.classList.toggle("open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+  };
+  // On mesure en mode normal : si la rangée de rubriques défile, on passe en menu.
+  // Pendant la bascule, aucune transition : le menu ne doit pas apparaître en fondu au chargement.
+  const fit = () => {
+    bar.classList.add("measuring");
+    bar.classList.remove("compact");
+    const compact = nav.scrollWidth > nav.clientWidth + 1;
+    bar.classList.toggle("compact", compact);
+    if (!compact) setOpen(false);
+    bar.getBoundingClientRect();
+    requestAnimationFrame(() => bar.classList.remove("measuring"));
+  };
+  toggle.addEventListener("click", () => setOpen(!bar.classList.contains("open")));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && bar.classList.contains("open")) { setOpen(false); toggle.focus(); }
+  });
+  document.addEventListener("click", (event) => {
+    if (bar.classList.contains("open") && !bar.contains(event.target)) setOpen(false);
+  });
+  window.addEventListener("resize", fit);
+  fit();
 }
 
 function initNav() {
@@ -223,6 +257,7 @@ function initForm() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  initMenu();  // avant initNav : l'indicateur se place sur la mise en page définitive
   initNav();
   initSegmented();
   initLiveFilters();
