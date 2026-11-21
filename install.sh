@@ -17,9 +17,9 @@ set -Eeuo pipefail
 umask 027
 
 LOGIT_REPO="https://github.com/KyoshiroFR/logit.git"
-LOGIT_DEFAULT_REF="v0.1.0"
+LOGIT_DEFAULT_REF="correctifs-installation"  # branche de test ; passera au tag lors de la publication
 # Empreinte Git du commit de la version : renseignée lors de la publication d'une version.
-LOGIT_DEFAULT_COMMIT="21980e6c206fd7514135812b84f7767083e412f6"
+LOGIT_DEFAULT_COMMIT=""
 
 REF=${LOGIT_INSTALL_REF:-$LOGIT_DEFAULT_REF}
 DIR=${LOGIT_INSTALL_DIR:-/opt/logit}
@@ -85,7 +85,8 @@ wait_healthy() {  # attend que le conteneur de l'application soit « healthy »
 # --- 1. Système ---------------------------------------------------------------------------
 printf '%sLogIT — installation%s %s(%s)%s\n' "$B" "$N" "$D" "$REF" "$N"
 (( EUID == 0 )) || { printf 'Lance l’installation en root : sudo bash -c "$(curl -fsSL …/install.sh)", ou depuis « su - ».\n' >&2; exit 1; }
-: >"$LOG"; chmod 600 "$LOG"
+touch "$LOG"; chmod 600 "$LOG"  # complété à chaque passage : l'historique des installations et mises à jour est conservé
+printf '\n===== %s — install.sh (%s) =====\n' "$(date -Iseconds)" "$REF" >>"$LOG"
 
 step "Analyse du serveur"
 [[ -r /etc/os-release ]] || fail "système non reconnu (/etc/os-release absent)."
@@ -308,6 +309,7 @@ COMPOSE_FILES="$DIR/deploy/compose.yaml:$DIR/deploy/compose.caddy.yaml"
     echo "COMPOSE_FILE=$COMPOSE_FILES"
     echo "LOGIT_VERSION=$REF"
     echo "LOGIT_COMMIT=$COMMIT"
+    echo "LOGIT_IMAGE=logit:${COMMIT:0:12}-$(date +%Y%m%d%H%M%S)"
     echo "LOGIT_MODE=$MODE"
     echo "LOGIT_HOSTS=\"$HOSTS\""
     echo "LOGIT_CADDY_SITES=\"${HOSTS// /, }\""
@@ -326,7 +328,7 @@ ok "Secrets aléatoires écrits dans $DIR/.env (root uniquement)"
 
 # --- 8. Construction et démarrage ---------------------------------------------------------
 step "Construction et démarrage (quelques minutes la première fois)"
-compose build >>"$LOG" 2>&1 || fail "la construction de l’image a échoué."
+compose build --pull >>"$LOG" 2>&1 || fail "la construction de l’image a échoué."
 show_logs() {  # affiche la cause d'un échec de démarrage, sans secret (les journaux n'en contiennent pas)
     printf '\n%sDerniers messages des services :%s\n' "$D" "$N" >&2
     compose logs --no-color --tail 20 migrate app 2>&1 | sed 's/^/    /' >&2 || true

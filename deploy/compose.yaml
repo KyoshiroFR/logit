@@ -33,7 +33,7 @@ services:
     security_opt: [no-new-privileges:true]
 
   migrate:
-    image: logit:${LOGIT_VERSION:-local}
+    image: ${LOGIT_IMAGE:-logit:local}
     build: ..
     command: migrate
     restart: "no"
@@ -47,7 +47,7 @@ services:
     security_opt: [no-new-privileges:true]
 
   app:
-    image: logit:${LOGIT_VERSION:-local}
+    image: ${LOGIT_IMAGE:-logit:local}
     restart: unless-stopped
     environment: *app-env
     depends_on:
