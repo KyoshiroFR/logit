@@ -8,8 +8,7 @@ services:
       LOGIT_CADDY_SITES: ${LOGIT_CADDY_SITES:?}
       LOGIT_PORT_SUFFIX: ${LOGIT_PORT_SUFFIX:-}
       LOGIT_DEFAULT_SNI: ${LOGIT_DEFAULT_SNI:?}
-    ports:
-      - "${LOGIT_HTTP_PORT:-80}:80"
+    ports:  # uniquement du HTTPS ; la redirection depuis le port 80 est dans compose.caddy-http.yaml
       - "${LOGIT_PUBLIC_PORT:-443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

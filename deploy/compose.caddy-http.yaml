@@ -1,0 +1,6 @@
+# Redirection HTTP → HTTPS du Caddy intégré : ajoutée par l'installeur seulement quand LogIT est sur le port 443
+# et que le port 80 est libre. Sur un port HTTPS dédié (6720 par défaut), LogIT ne sert que du HTTPS.
+services:
+  proxy:
+    ports:
+      - "${LOGIT_HTTP_PORT:-80}:80"

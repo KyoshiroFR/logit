@@ -24,6 +24,23 @@ env_set() {  # remplace la valeur, ou l'ajoute si la clé n'existe pas encore (i
 }
 free_mb() { df -Pm "$1" | awk 'NR==2 {print $4}'; }
 image_id() { docker image inspect -f '{{.Id}}' "$1" 2>/dev/null || true; }
+port_used() { [[ -n $(ss -Hltn "sport = :$1" 2>/dev/null) ]]; }
+
+# Les ports de LogIT doivent être libres, ou tenus par ses propres conteneurs : sinon un autre service les a pris
+# depuis l'installation, et LogIT ne pourrait pas redémarrer (ni revenir en arrière).
+check_ports() {
+    local service ports p
+    if [[ $(env_value LOGIT_MODE) == caddy ]]; then
+        service=proxy; ports=$(env_value LOGIT_PUBLIC_PORT)
+        [[ $(env_value COMPOSE_FILE) != *compose.caddy-http.yaml* ]] || ports+=" $(env_value LOGIT_HTTP_PORT)"
+    else
+        service=app; ports=$(env_value LOGIT_APP_PORT)
+    fi
+    [[ -z $(compose ps -q --status running "$service" 2>/dev/null) ]] || return 0
+    for p in $ports; do
+        if port_used "$p"; then die "le port $p est utilisé par un autre service ($(ss -Hltnp "sport = :$p" 2>/dev/null | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | head -n1)). Rien n’a été modifié."; fi
+    done
+}
 compose() {
     local files=() f
     IFS=: read -ra list <<<"$(env_value COMPOSE_FILE)"
@@ -110,6 +127,8 @@ update() {
     need_mb=100; [[ -z $last_dump ]] || need_mb=$(( $(du -m "$last_dump" | cut -f1) * 2 + 100 ))
     (( $(free_mb "$BACKUP_DIR") >= need_mb )) || die "${need_mb} Mo libres nécessaires dans $BACKUP_DIR pour la sauvegarde (disponible : $(free_mb "$BACKUP_DIR") Mo). Rien n’a été modifié."
 
+    check_ports
+
     # Correctifs de sécurité des images de base (PostgreSQL, Caddy, Python), même sans nouvelle version de LogIT.
     say "Recherche des correctifs de sécurité des images"
     local base_images=() img before=() changed=()
@@ -152,6 +171,12 @@ update() {
     done
     env_set LOGIT_VERSION "$target"; env_set LOGIT_COMMIT "$new_commit"
     env_set LOGIT_IMAGE "$new_image"; env_set LOGIT_IMAGE_PRECEDENTE "$current_image"
+    # Installations antérieures : le port 80 du Caddy intégré était dans compose.caddy.yaml ; il a désormais son
+    # propre fichier. On l'ajoute pour garder la redirection HTTP → HTTPS telle qu'elle était.
+    if [[ $(env_value LOGIT_MODE) == caddy && -n $(env_value LOGIT_HTTP_PORT) && $(env_value COMPOSE_FILE) != *compose.caddy-http.yaml* \
+          && -f $LOGIT_DIR/deploy/compose.caddy-http.yaml ]]; then
+        env_set COMPOSE_FILE "$(env_value COMPOSE_FILE):$LOGIT_DIR/deploy/compose.caddy-http.yaml"
+    fi
 
     revert_code() {
         (umask 022 && git -C "$LOGIT_DIR" checkout --quiet --detach "$current_commit")

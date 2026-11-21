@@ -11,7 +11,7 @@
 #   LOGIT_INSTALL_PROXY   auto (défaut) | caddy | nginx | apache | host-caddy | manual
 #   LOGIT_INSTALL_DIR     dossier d'installation (défaut /opt/logit)
 #   LOGIT_INSTALL_REF     version à installer (défaut : celle de ce script)
-#   LOGIT_INSTALL_YES=1   aucune question, valeurs détectées
+#   LOGIT_INSTALL_YES=1   installation automatisée, sans aucune question
 # shellcheck disable=SC1091,SC1112,SC2015,SC2016
 set -Eeuo pipefail
 umask 027
@@ -153,6 +153,25 @@ if [[ -f $DIR/.env ]]; then
 fi
 [[ ! -e $DIR ]] || fail "$DIR existe déjà sans installation LogIT. Choisis un autre dossier avec LOGIT_INSTALL_DIR."
 
+# --- Type d'installation (installation neuve) ---------------------------------------------
+# 1. automatisée : aucune question, LogIT seul en HTTPS sur le port 6720 (indépendant des autres services) ;
+# 2. manuelle : adresses, port, ou branchement sur le reverse proxy du serveur.
+HTTPS_PORT_DEFAULT=6720
+INSTALL_KIND=auto
+if [[ $ASSUME_YES != 1 && -t 0 ]]; then
+    step "Type d’installation"
+    info "1. Automatisée : aucune question, LogIT en HTTPS sur le port $HTTPS_PORT_DEFAULT (conseillé)"
+    info "2. Manuelle : adresses d’accès, port, ou branchement sur le reverse proxy du serveur"
+    ask "Ton choix (1 ou 2)" "1"
+    case $REPLY in
+        1) ;;
+        2) INSTALL_KIND=manual ;;
+        *) fail "choix inconnu : « $REPLY » (réponds 1 ou 2)." ;;
+    esac
+fi
+[[ $INSTALL_KIND == manual ]] || ASSUME_YES=1
+ok "Installation $([[ $INSTALL_KIND == auto ]] && echo automatisée || echo manuelle)"
+
 # --- 3. Prérequis -------------------------------------------------------------------------
 step "Prérequis"
 missing=()
@@ -231,27 +250,35 @@ for h in $HOSTS; do [[ $h =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] 
 FIRST_HOST=${HOSTS%% *}
 ok "$HOSTS"
 
-# --- 5. Reverse proxy ---------------------------------------------------------------------
-step "Reverse proxy"
+# --- 5. Exposition -----------------------------------------------------------------------
+step "Exposition"
 L443=$(listener_of 443 || true); L80=$(listener_of 80 || true)
-detected=none
+host_proxy=""; host_label=""
 case "${L443:-$L80}" in
-    nginx*) detected=nginx ;;
-    apache2*|httpd*) detected=apache ;;
-    caddy*) detected=host-caddy ;;
-    "") detected=none ;;
-    *) detected=other ;;
+    nginx*) [[ -d /etc/nginx ]] && command -v nginx >/dev/null && { host_proxy=nginx; host_label="nginx"; } ;;
+    apache2*|httpd*) command -v a2ensite >/dev/null && { host_proxy=apache; host_label="Apache"; } ;;
+    caddy*) [[ -f /etc/caddy/Caddyfile ]] && command -v caddy >/dev/null && { host_proxy=host-caddy; host_label="Caddy (système)"; } ;;
 esac
-if [[ $PROXY_CHOICE == auto ]]; then
-    case $detected in
-        nginx)  [[ -d /etc/nginx ]] && command -v nginx >/dev/null && MODE=nginx || MODE=manual ;;
-        apache) command -v a2ensite >/dev/null && MODE=apache || MODE=manual ;;
-        host-caddy) [[ -f /etc/caddy/Caddyfile ]] && command -v caddy >/dev/null && MODE=host-caddy || MODE=manual ;;
-        none) MODE=caddy ;;
-        *) MODE=manual ;;
-    esac
+if [[ $PROXY_CHOICE != auto ]]; then
+    MODE=$PROXY_CHOICE                      # imposé par LOGIT_INSTALL_PROXY
+elif [[ $INSTALL_KIND == auto ]]; then
+    MODE=caddy                              # automatisée : toujours le port HTTPS dédié
 else
-    MODE=$PROXY_CHOICE
+    MODE=caddy
+    info "1. Port HTTPS dédié : LogIT indépendant des autres services (Caddy intégré)"
+    if [[ -n $host_proxy ]]; then
+        info "2. Via $host_label, déjà sur 80/443 : adresse sans port, sans toucher aux autres sites"
+    elif [[ -n ${L443:-$L80} ]]; then
+        info "2. Écoute locale seulement (127.0.0.1) : la route sera à ajouter dans ton proxy (${L443:-$L80})"
+    fi
+    if [[ -n ${L443:-$L80} ]]; then
+        ask "Ton choix (1 ou 2)" "1"
+        case $REPLY in
+            1) ;;
+            2) MODE=${host_proxy:-manual} ;;
+            *) fail "choix inconnu : « $REPLY » (réponds 1 ou 2)." ;;
+        esac
+    fi
 fi
 case $MODE in
     caddy|nginx|apache|host-caddy|manual) ;;
@@ -261,16 +288,18 @@ esac
 PUBLIC_PORT=443; HTTP_PORT=80; APP_PORT=""
 case $MODE in
     caddy)
-        if port_used 443 || port_used 80; then
-            PUBLIC_PORT=8443; HTTP_PORT=8080
-            while port_used "$PUBLIC_PORT" || port_used "$HTTP_PORT"; do PUBLIC_PORT=$((PUBLIC_PORT + 1)); HTTP_PORT=$((HTTP_PORT + 1)); done
-            warn "Ports 80/443 occupés : Caddy intégré sur $HTTP_PORT/$PUBLIC_PORT."
-        fi
-        ok "Aucun reverse proxy détecté : Caddy intégré, HTTPS sur le port $PUBLIC_PORT" ;;
-    nginx)      ok "nginx détecté : LogIT y sera ajouté comme site, sans toucher aux sites existants" ;;
-    apache)     ok "Apache détecté : LogIT y sera ajouté comme site, sans toucher aux sites existants" ;;
-    host-caddy) ok "Caddy (système) détecté : LogIT y sera ajouté par un fichier importé" ;;
-    manual)     warn "Service inconnu sur 80/443 (${L443:-$L80}) : LogIT écoutera en local, la route sera à ajouter dans ton proxy." ;;
+        PUBLIC_PORT=$HTTPS_PORT_DEFAULT
+        if [[ $INSTALL_KIND == manual ]]; then ask "Port HTTPS de LogIT" "$HTTPS_PORT_DEFAULT"; PUBLIC_PORT=$REPLY; fi
+        [[ $PUBLIC_PORT =~ ^[0-9]+$ ]] && (( PUBLIC_PORT >= 1 && PUBLIC_PORT <= 65535 )) || fail "port invalide : $PUBLIC_PORT."
+        port_used "$PUBLIC_PORT" && fail "le port $PUBLIC_PORT est déjà utilisé ($(listener_of "$PUBLIC_PORT" || true)). Relance en installation manuelle pour en choisir un autre. Rien n’a été installé."
+        # Uniquement du HTTPS, sauf sur 443 : le port 80 (s'il est libre) redirige alors vers HTTPS.
+        HTTP_PORT=""
+        [[ $PUBLIC_PORT == 443 ]] && ! port_used 80 && HTTP_PORT=80
+        ok "LogIT en HTTPS sur le port $PUBLIC_PORT (Caddy intégré)" ;;
+    nginx)      ok "LogIT sera ajouté à nginx comme site, sans toucher aux sites existants" ;;
+    apache)     ok "LogIT sera ajouté à Apache comme site, sans toucher aux sites existants" ;;
+    host-caddy) ok "LogIT sera ajouté à Caddy (système) par un fichier importé" ;;
+    manual)     warn "LogIT écoutera en local, la route sera à ajouter dans ton proxy (${L443:-$L80})." ;;
 esac
 if [[ $MODE != caddy ]]; then
     APP_PORT=8040; while port_used "$APP_PORT"; do APP_PORT=$((APP_PORT + 1)); done
@@ -279,7 +308,11 @@ fi
 
 # Pare-feu : information seulement, LogIT ne modifie pas tes règles.
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
-    ufw status 2>/dev/null | grep -qE "^$PUBLIC_PORT(/tcp)?\s+ALLOW" || warn "Pare-feu ufw actif sans règle pour le port $PUBLIC_PORT : ufw allow $PUBLIC_PORT/tcp"
+    if [[ $MODE == caddy ]]; then
+        info "ufw actif : le port $PUBLIC_PORT est publié par Docker, qui ne passe pas par les règles ufw."
+    else
+        ufw status 2>/dev/null | grep -qE "^$PUBLIC_PORT(/tcp)?\s+ALLOW" || warn "Pare-feu ufw actif sans règle pour le port $PUBLIC_PORT : ufw allow $PUBLIC_PORT/tcp"
+    fi
 fi
 
 # --- 6. Code source -----------------------------------------------------------------------
@@ -303,6 +336,7 @@ DB_OWNER_PASSWORD=$(random_secret 40)
 DB_APP_PASSWORD=$(random_secret 40)
 PORT_SUFFIX=""; [[ $PUBLIC_PORT == 443 ]] || PORT_SUFFIX=":$PUBLIC_PORT"
 COMPOSE_FILES="$DIR/deploy/compose.yaml:$DIR/deploy/compose.caddy.yaml"
+[[ -z $HTTP_PORT ]] || COMPOSE_FILES+=":$DIR/deploy/compose.caddy-http.yaml"  # redirection HTTP → HTTPS (port 443 seulement)
 [[ $MODE == caddy ]] || COMPOSE_FILES="$DIR/deploy/compose.yaml:$DIR/deploy/compose.port.yaml"
 {
     echo "# LogIT — généré le $(date -Iseconds). Contient des secrets : lisible par root uniquement."
