@@ -171,6 +171,10 @@ if [[ $ASSUME_YES != 1 && -t 0 ]]; then
 fi
 [[ $INSTALL_KIND == manual ]] || ASSUME_YES=1
 ok "Installation $([[ $INSTALL_KIND == auto ]] && echo automatisée || echo manuelle)"
+# Port déjà pris : on s'arrête avant d'installer quoi que ce soit (prérequis, Docker).
+if [[ $INSTALL_KIND == auto && $PROXY_CHOICE == auto ]] && port_used "$HTTPS_PORT_DEFAULT"; then
+    fail "le port $HTTPS_PORT_DEFAULT est déjà utilisé ($(listener_of "$HTTPS_PORT_DEFAULT" || true)). Relance en installation manuelle pour choisir un autre port. Rien n’a été modifié."
+fi
 
 # --- 3. Prérequis -------------------------------------------------------------------------
 step "Prérequis"
@@ -291,7 +295,7 @@ case $MODE in
         PUBLIC_PORT=$HTTPS_PORT_DEFAULT
         if [[ $INSTALL_KIND == manual ]]; then ask "Port HTTPS de LogIT" "$HTTPS_PORT_DEFAULT"; PUBLIC_PORT=$REPLY; fi
         [[ $PUBLIC_PORT =~ ^[0-9]+$ ]] && (( PUBLIC_PORT >= 1 && PUBLIC_PORT <= 65535 )) || fail "port invalide : $PUBLIC_PORT."
-        port_used "$PUBLIC_PORT" && fail "le port $PUBLIC_PORT est déjà utilisé ($(listener_of "$PUBLIC_PORT" || true)). Relance en installation manuelle pour en choisir un autre. Rien n’a été installé."
+        port_used "$PUBLIC_PORT" && fail "le port $PUBLIC_PORT est déjà utilisé ($(listener_of "$PUBLIC_PORT" || true)). Relance en installation manuelle pour en choisir un autre. LogIT n’a pas été installé."
         # Uniquement du HTTPS, sauf sur 443 : le port 80 (s'il est libre) redirige alors vers HTTPS.
         HTTP_PORT=""
         [[ $PUBLIC_PORT == 443 ]] && ! port_used 80 && HTTP_PORT=80
