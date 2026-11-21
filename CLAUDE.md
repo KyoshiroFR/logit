@@ -44,7 +44,7 @@ Scripts shell : `bash -n` et `shellcheck` sur `install.sh` et `deploy/logit`.
   - `models.py` : une fiche (`Intervention`) est une suite de `Version`. Corriger, marquer réalisée ou annuler ajoute une version (auteur, date serveur, motif obligatoire). Deux dates : `occurred_at` (déclarée) et `recorded_at` (serveur, non modifiable).
   - `chain.py` : chaîne d'empreintes SHA-256 sur les versions et le journal de sécurité (`AuditEvent`), vérifiée par `manage.py verify_chain` / `logit verify` / page Intégrité.
   - `permissions.py` : rôles admin (`is_superuser`), groupes « Contributeur » et « Lecteur ».
-  - `security.py` : CSP stricte, verrouillage, TOTP. `bugs.py` : signalements (`BugReport`, table modifiable, pas une trace).
+  - `security.py` : CSP stricte, blocage par adresse IP (jamais par compte), TOTP. `bugs.py` : signalements (`BugReport`, table modifiable, pas une trace).
   - `management/commands/` : `secure_db` (droits PostgreSQL), `verify_chain`, `audit_event`, `bootstrap_admin`.
 - `deploy/` : `compose.yaml` (db, migrate à usage unique, app), `compose.caddy.yaml` (Caddy intégré) ou `compose.port.yaml` (derrière le proxy du serveur), `entrypoint.sh`, et `logit` (commande d'exploitation installée dans `/usr/local/bin`).
 - `install.sh` : installe, ou met à jour si LogIT tourne déjà (il lance alors `logit update` de la version cible).

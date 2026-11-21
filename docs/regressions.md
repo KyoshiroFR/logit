@@ -48,7 +48,7 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
 | Comportement | Test |
 |---|---|
 | Le lecteur consulte tout mais ne peut ni créer, ni corriger, ni annuler, ni administrer. | `InterventionTests.test_lecteur_consulte_sans_modifier` |
-| Verrouillage temporaire après plusieurs échecs, inscrit au journal. | `AuthenticationTests.test_verrouillage_apres_echecs` |
+| Après trop d'échecs depuis une même IP (mot de passe, compte inconnu ou code TOTP), c'est l'IP qui est bloquée, jamais le compte : le même compte se connecte depuis une autre adresse. Blocage limité dans le temps et inscrit au journal. | `AuthenticationTests.test_verrouillage_de_l_ip_et_non_du_compte`, `AuthenticationTests.test_codes_totp_faux_bloquent_l_ip` |
 | Mot de passe temporaire à changer, puis TOTP imposé ; 10 codes de secours à usage unique ; code TOTP rejoué refusé. | `AuthenticationTests.test_mot_de_passe_initial_puis_enrolement_totp_obligatoire` |
 | Un admin crée un compte avec un mot de passe temporaire aléatoire, inscrit au journal. | `AuthenticationTests.test_creation_de_compte_par_admin` |
 | Le dernier administrateur actif ne peut pas perdre son rôle. | `AuthenticationTests.test_dernier_admin_protege` |
@@ -84,10 +84,10 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
 À vérifier à la main quand on modifie le code concerné.
 
 - **Interactions JavaScript** (`logit.js`) : menu repliable de la barre du haut, indicateurs glissants, apparition progressive, compteurs des chiffres clés, filtrage sans rechargement, raccourci `/`, collage de capture avec Ctrl+V, fenêtre de signalement, état « Vérification… » de la page Intégrité. Tout doit aussi fonctionner sans JavaScript.
-- **Code TOTP en 6 cases** : le vrai champ reste le seul à recevoir la saisie (collage, remplissage automatique) ; il redevient un champ normal pour un code de secours ; un code complet est envoyé seul, mais jamais au rechargement après un code refusé (sinon envoi en boucle et verrouillage du compte).
+- **Code TOTP en 6 cases** : le vrai champ reste le seul à recevoir la saisie (collage, remplissage automatique) ; il redevient un champ normal pour un code de secours ; un code complet est envoyé seul, mais jamais au rechargement après un code refusé (sinon envoi en boucle et blocage de l'adresse IP).
 - **`prefers-reduced-motion`** coupe toutes les animations (fin de `logit.css`).
 - **Session de 8 heures**, fermée avec le navigateur ; mot de passe de 12 caractères minimum (`config/settings.py`).
-- **Adresse IP du client** lue dans `X-Real-IP` (posé par le proxy de LogIT), sinon `REMOTE_ADDR` (`chain.py`).
+- **Adresse IP du client** lue dans `X-Real-IP` (posé par le proxy de LogIT), sinon `REMOTE_ADDR` (`chain.py`). Chaque mode de proxy de l'installeur doit poser cet en-tête : sans lui, tous les utilisateurs partagent l'IP du proxy, et le blocage par IP bloquerait tout le monde.
 - **Le mot de passe propriétaire PostgreSQL n'est jamais dans le conteneur `app`** : seul le service `migrate` le reçoit (`deploy/compose.yaml`).
 - **Installation et mise à jour** (`install.sh`, `deploy/logit`) : aucun test automatique. Contrôles : `bash -n` et `shellcheck`, puis essai sur une Debian 12 ou 13. Points à préserver :
   - le code doit rester lisible par l'uid 10001 du conteneur (clonage en `umask 022`, `chmod -R go=rX /app` dans le Dockerfile) ;

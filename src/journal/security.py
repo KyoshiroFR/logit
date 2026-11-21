@@ -19,8 +19,8 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
 
-from .chain import record_event
-from .models import Profile
+from .chain import client_ip, record_event
+from .models import AuditEvent, Profile
 
 OTP_SESSION_KEY = "logit_otp_ok"
 RECOVERY_COUNT = 10
@@ -99,24 +99,33 @@ class LoginForm(forms.Form):
     password = forms.CharField(label="Mot de passe", widget=forms.PasswordInput)
 
 
-GENERIC_ERROR = "Identifiant ou mot de passe incorrect, ou compte temporairement verrouillé."
+GENERIC_ERROR = "Identifiant ou mot de passe incorrect, ou trop de tentatives depuis cette adresse : réessaie dans quelques minutes."
 
 
-def register_failure(request, user, reason):
-    profile = profile_of(user)
-    profile.failed_attempts += 1
-    details = {"raison": reason, "échecs": profile.failed_attempts}
-    if profile.failed_attempts >= settings.LOGIT_LOCKOUT_ATTEMPTS:
-        profile.locked_until = timezone.now() + timedelta(minutes=settings.LOGIT_LOCKOUT_MINUTES)
-        profile.failed_attempts = 0
-        record_event("account_locked", target=user.username, details=details, request=request)
-    profile.save(update_fields=["failed_attempts", "locked_until"])
-    record_event("login_failed", target=user.username, details=details, request=request)
+# Le verrouillage porte sur l'adresse IP, jamais sur le compte : sinon n'importe qui pourrait
+# bloquer l'accès d'un collègue en tapant de mauvais mots de passe à son nom.
+# Les échecs sont comptés dans le journal de sécurité, où chacun est déjà inscrit avec son IP.
+
+def _window_start():
+    return timezone.now() - timedelta(minutes=settings.LOGIT_LOCKOUT_MINUTES)
 
 
-def is_locked(user):
-    profile = profile_of(user)
-    return bool(profile.locked_until and profile.locked_until > timezone.now())
+def ip_locked(request):
+    """Vrai si l'IP du client a été bloquée il y a moins de LOGIT_LOCKOUT_MINUTES."""
+    ip = client_ip(request)
+    return bool(ip) and AuditEvent.objects.filter(action="ip_locked", ip=ip, recorded_at__gt=_window_start()).exists()
+
+
+def register_failure(request, target, reason):
+    """Inscrit l'échec ; au-delà de LOGIT_LOCKOUT_ATTEMPTS échecs récents depuis la même IP, la bloque."""
+    record_event("login_failed", target=target, details={"raison": reason}, request=request)
+    ip = client_ip(request)
+    if not ip or ip_locked(request):
+        return
+    failures = AuditEvent.objects.filter(action="login_failed", ip=ip, recorded_at__gt=_window_start()).count()
+    if failures >= settings.LOGIT_LOCKOUT_ATTEMPTS:
+        record_event("ip_locked", target=ip, details={"échecs": failures, "minutes": settings.LOGIT_LOCKOUT_MINUTES},
+                     request=request)
 
 
 @sensitive_post_parameters("password")
@@ -127,23 +136,16 @@ def login_view(request):
     form = LoginForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         username = form.cleaned_data["username"]
-        known = get_user_model().objects.filter(username=username, is_active=True).first()
-        if known and is_locked(known):
-            record_event("login_refused_locked", target=username, request=request)
+        if ip_locked(request):
+            record_event("login_refused_ip_locked", target=username[:150], request=request)
             form.add_error(None, GENERIC_ERROR)
         else:
             user = authenticate(request, username=username, password=form.cleaned_data["password"])
             if user is None:
-                if known:
-                    register_failure(request, known, "mot de passe")
-                else:
-                    record_event("login_failed", target=username[:150], details={"raison": "compte inconnu"},
-                                 request=request)
+                known = get_user_model().objects.filter(username=username, is_active=True).exists()
+                register_failure(request, username[:150], "mot de passe" if known else "compte inconnu")
                 form.add_error(None, GENERIC_ERROR)
             else:
-                profile = profile_of(user)
-                profile.failed_attempts = 0
-                profile.save(update_fields=["failed_attempts"])
                 login(request, user)
                 request.session[OTP_SESSION_KEY] = False
                 record_event("login_password_ok", actor=user, target=user.username, request=request)
@@ -204,6 +206,10 @@ def totp_verify(request):
     profile = profile_of(request.user)
     if not profile.totp_confirmed:
         return redirect("home")
+    if request.method == "POST" and ip_locked(request):  # adresse bloquée : aucune tentative de plus
+        record_event("login_refused_ip_locked", target=request.user.username, request=request)
+        logout(request)
+        return redirect("login")
     form = CodeForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         code = form.cleaned_data["code"]
@@ -216,17 +222,14 @@ def totp_verify(request):
         if method:
             request.session.cycle_key()
             request.session[OTP_SESSION_KEY] = True
-            profile.failed_attempts = 0
-            profile.save(update_fields=["failed_attempts"])
             record_event("login_ok", actor=request.user, target=request.user.username,
                          details={"second facteur": method, "codes de secours restants": len(profile.recovery_codes)},
                          request=request)
             if method == "code de secours":
                 messages.warning(request, f"Code de secours utilisé. Il en reste {len(profile.recovery_codes)}.")
             return redirect("home")
-        user = request.user
-        register_failure(request, user, "code TOTP")
-        if is_locked(user):
+        register_failure(request, request.user.username, "code TOTP")
+        if ip_locked(request):
             logout(request)
             return redirect("login")
         form.add_error("code", "Code invalide.")

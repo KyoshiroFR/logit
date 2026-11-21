@@ -124,7 +124,7 @@ Dans l’ordre : sauvegarde de la base, récupération du code, construction de 
 
 ### Sécurité et traçabilité
 
-- Comptes nominatifs, mot de passe initial imposé (12 caractères minimum), **TOTP** imposable par compte avec 10 codes de secours à usage unique, verrouillage 15 minutes après 5 échecs, session limitée à 8 heures.
+- Comptes nominatifs, mot de passe initial imposé (12 caractères minimum), **TOTP** imposable par compte avec 10 codes de secours à usage unique, après 5 échecs en 15 minutes depuis une même adresse IP, cette adresse est bloquée 15 minutes (le compte, lui, n’est jamais verrouillé : personne ne peut bloquer l’accès d’un collègue), session limitée à 8 heures.
 - **Journal de sécurité** : connexions réussies et échouées, verrouillages, création et modification de comptes, réinitialisations, référentiel.
 - **Traces immuables au niveau de PostgreSQL** :
   - l’application se connecte avec un compte qui n’a que les droits de lecture et d’ajout sur les fiches, leurs versions et le journal ;
