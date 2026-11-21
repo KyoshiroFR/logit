@@ -19,7 +19,7 @@ umask 027
 LOGIT_REPO="https://github.com/KyoshiroFR/logit.git"
 LOGIT_DEFAULT_REF="v0.1.0"
 # Empreinte Git du commit de la version : renseignée lors de la publication d'une version.
-LOGIT_DEFAULT_COMMIT=""
+LOGIT_DEFAULT_COMMIT="21980e6c206fd7514135812b84f7767083e412f6"
 
 REF=${LOGIT_INSTALL_REF:-$LOGIT_DEFAULT_REF}
 DIR=${LOGIT_INSTALL_DIR:-/opt/logit}
