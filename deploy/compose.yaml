@@ -49,11 +49,7 @@ services:
   app:
     image: ${LOGIT_IMAGE:-logit:local}
     restart: unless-stopped
-    environment:
-      <<: *app-env
-      LOGIT_SECURITY_LOG: /var/log/logit/securite.log  # échecs de connexion, lus par fail2ban sur l'hôte
-    volumes:
-      - /var/log/logit:/var/log/logit
+    environment: *app-env
     depends_on:
       migrate: {condition: service_completed_successfully}
     networks: [internal]

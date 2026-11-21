@@ -182,58 +182,18 @@ class DatabaseProtectionTests(Base):
 
 @override_settings(LOGIT_LOCKOUT_ATTEMPTS=3)
 class AuthenticationTests(TestCase):
-    def login(self, username, password, ip="192.0.2.10"):
-        return self.client.post("/connexion/", {"username": username, "password": password}, secure=True,
-                                HTTP_X_REAL_IP=ip)
+    def login(self, username, password):
+        return self.client.post("/connexion/", {"username": username, "password": password}, secure=True)
 
-    def test_verrouillage_de_l_ip_et_non_du_compte(self):
+    def test_verrouillage_apres_echecs(self):
         make_user("carole")
-        # Échecs depuis une même IP, y compris sur un compte inconnu : l'IP est bloquée.
-        self.assertContains(self.login("carole", "mauvais"), "Identifiant ou mot de passe incorrect")
-        self.assertContains(self.login("inconnu", "mauvais"), "Identifiant ou mot de passe incorrect")
-        self.login("carole", "mauvais")
-        self.assertTrue(AuditEvent.objects.filter(action="ip_locked", ip="192.0.2.10").exists())
+        for _ in range(3):
+            self.assertContains(self.login("carole", "mauvais"), "Identifiant ou mot de passe incorrect")
         response = self.login("carole", "motdepasse-solide-42")
-        self.assertContains(response, "trop de tentatives depuis cette adresse")
-        self.assertTrue(AuditEvent.objects.filter(action="login_refused_ip_locked", ip="192.0.2.10").exists())
-        # Le compte, lui, n'est pas bloqué : depuis une autre adresse, la connexion fonctionne.
-        self.assertRedirects(self.login("carole", "motdepasse-solide-42", ip="192.0.2.20"), "/",
-                             fetch_redirect_response=False)
-        self.client.post("/deconnexion/", secure=True)
-        # Le blocage ne dure que LOGIT_LOCKOUT_MINUTES.
-        with self.settings(LOGIT_LOCKOUT_MINUTES=0):
-            self.assertRedirects(self.login("carole", "motdepasse-solide-42"), "/", fetch_redirect_response=False)
-
-    def test_journal_fail2ban_sans_texte_saisi(self):
-        import logging
-        import re
-        import tempfile
-        logger = logging.getLogger("logit.fail2ban")
-        logger.handlers.clear()
-        with tempfile.TemporaryDirectory() as tmp, self.settings(LOGIT_SECURITY_LOG=f"{tmp}/securite.log"):
-            make_user("fanny")
-            self.login("x ip=6.6.6.6", "mauvais", ip="192.0.2.40")  # identifiant forgé
-            self.login("fanny", "mauvais", ip="192.0.2.41")
-            for handler in logger.handlers:
-                handler.close()
-            lines = open(f"{tmp}/securite.log", encoding="utf-8").read().splitlines()
-        logger.handlers.clear()
-        pattern = r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d LogIT échec de connexion ip=(\S+) motif=([a-z-]+)$"
-        self.assertEqual([re.match(pattern, line).groups() for line in lines],
-                         [("192.0.2.40", "compte-inconnu"), ("192.0.2.41", "mot-de-passe")])
-        self.assertNotIn("6.6.6.6", "\n".join(lines))
-
-    def test_codes_totp_faux_bloquent_l_ip(self):
-        user = make_user("eric")
-        Profile.objects.filter(user=user).update(totp_secret=pyotp.random_base32(), totp_confirmed=True)
-        self.login("eric", "motdepasse-solide-42", ip="192.0.2.30")
-        for _ in range(2):
-            self.assertContains(self.client.post("/connexion/code/", {"code": "000000"}, secure=True,
-                                                 HTTP_X_REAL_IP="192.0.2.30"), "Code invalide")
-        response = self.client.post("/connexion/code/", {"code": "000000"}, secure=True, HTTP_X_REAL_IP="192.0.2.30")
-        self.assertRedirects(response, "/connexion/", fetch_redirect_response=False)  # déconnecté
-        self.assertTrue(AuditEvent.objects.filter(action="ip_locked", ip="192.0.2.30").exists())
-        self.assertContains(self.login("eric", "motdepasse-solide-42", ip="192.0.2.30"), "trop de tentatives")
+        self.assertContains(response, "temporairement verrouillé")
+        self.assertTrue(AuditEvent.objects.filter(action="account_locked", target="carole").exists())
+        Profile.objects.filter(user__username="carole").update(locked_until=timezone.now() - timedelta(seconds=1))
+        self.assertRedirects(self.login("carole", "motdepasse-solide-42"), "/", fetch_redirect_response=False)
 
     def test_mot_de_passe_initial_puis_enrolement_totp_obligatoire(self):
         make_user("dan", must_change_password=True, totp_required=True)

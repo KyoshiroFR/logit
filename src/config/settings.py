@@ -113,13 +113,9 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
 
-# Blocage par adresse IP, jamais par compte. fail2ban bannit l'IP dès 5 échecs en 15 minutes (règle posée
-# par l'installeur) ; LogIT ne bloque lui-même qu'au-delà de 10, en filet de sécurité si fail2ban ne
-# joue pas son rôle. Ainsi, débloquer une IP dans fail2ban suffit (fail2ban-client set logit unbanip …).
-LOGIT_LOCKOUT_ATTEMPTS = 10
+# Verrouillage : 5 échecs consécutifs bloquent le compte 15 minutes.
+LOGIT_LOCKOUT_ATTEMPTS = 5
 LOGIT_LOCKOUT_MINUTES = 15
-# Une ligne par échec de connexion, lue par fail2ban (vide : pas de fichier, par exemple en développement).
-LOGIT_SECURITY_LOG = os.environ.get("LOGIT_SECURITY_LOG", "")
 LOGIT_VERSION = os.environ.get("LOGIT_VERSION", "dev")
 LOGIT_REPOSITORY = "https://github.com/KyoshiroFR/logit"
 # Signalements de bug : au plus 20 par personne et par heure.

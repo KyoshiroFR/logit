@@ -13,7 +13,7 @@
 {% if account %}<section class="card">
   <h2>Actions de sécurité</h2>
   <form method="post" action="{% url 'admin_user_reset_password' account.pk %}">{% csrf_token %}
-    <p class="small muted">Génère un nouveau mot de passe temporaire.</p>
+    <p class="small muted">Génère un nouveau mot de passe temporaire et déverrouille le compte.</p>
     <button type="submit">Réinitialiser le mot de passe</button></form>
   {% if profile.totp_confirmed %}<form method="post" action="{% url 'admin_user_reset_totp' account.pk %}">{% csrf_token %}
     <p class="small muted">Après vérification de l’identité de la personne (téléphone perdu, par exemple).</p>
