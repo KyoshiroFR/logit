@@ -159,3 +159,11 @@ Numérotation `v0.MINEUR.CORRECTIF` jusqu’à la mise en production, qui sera l
 
 1. Créer le tag (`git tag v0.1.0 && git push origin v0.1.0`).
 2. Sur `main`, renseigner dans `install.sh` `LOGIT_DEFAULT_REF` (le tag) et `LOGIT_DEFAULT_COMMIT` (`git rev-parse v0.1.0`). L’installateur refusera tout code dont le commit ne correspond pas.
+
+## Sécurité
+
+Une faille de sécurité se signale en privé : voir [SECURITY.md](SECURITY.md).
+
+## Licence
+
+LogIT est distribué sous licence [MIT](LICENSE).
