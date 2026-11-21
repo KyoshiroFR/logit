@@ -1,0 +1,64 @@
+# Intégration continue : les mêmes contrôles qu'avant chaque commit (voir CLAUDE.md), sur chaque envoi.
+name: Contrôles
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests Django (PostgreSQL 17)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: logit
+          POSTGRES_USER: logit_owner
+          POSTGRES_PASSWORD: ci-proprietaire
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U logit_owner -d logit"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      LOGIT_SECRET_KEY: ci
+      LOGIT_TESTING: "1"
+      LOGIT_DB_HOST: 127.0.0.1
+      LOGIT_DB_AS_OWNER: "1"
+      LOGIT_DB_OWNER_USER: logit_owner
+      LOGIT_DB_OWNER_PASSWORD: ci-proprietaire
+      LOGIT_DB_APP_USER: logit_app
+      LOGIT_DB_APP_PASSWORD: ci-application
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Tests
+        working-directory: src
+        run: python manage.py test journal
+
+  scripts:
+    name: Scripts shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n install.sh && bash -n deploy/logit
+      - run: shellcheck install.sh deploy/logit
+
+  image:
+    name: Image Docker et fichiers compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fichiers compose (Caddy intégré et derrière un proxy)
+        run: |
+          printf '%s\n' LOGIT_SECRET_KEY=ci LOGIT_HOSTS=logit.test LOGIT_DB_APP_PASSWORD=ci LOGIT_DB_OWNER_PASSWORD=ci \
+            LOGIT_CADDY_SITES=logit.test LOGIT_DEFAULT_SNI=logit.test LOGIT_APP_PORT=8040 > ci.env
+          docker compose --project-directory deploy --env-file ci.env -f deploy/compose.yaml -f deploy/compose.caddy.yaml config -q
+          docker compose --project-directory deploy --env-file ci.env -f deploy/compose.yaml -f deploy/compose.port.yaml config -q
+      - name: Construction de l'image
+        run: docker build -t logit:ci .

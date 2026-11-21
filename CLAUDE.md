@@ -37,6 +37,8 @@ Un seul test : `python manage.py test journal.tests.InterventionTests.test_…` 
 
 Scripts shell : `bash -n` et `shellcheck` sur `install.sh` et `deploy/logit`.
 
+La CI GitHub (`.github/workflows/ci.yml`) relance ces contrôles à chaque envoi, plus la validation des fichiers compose et la construction de l'image.
+
 ## Architecture
 
 - `src/config/` : réglages. Tout ce qui dépend de l'installation vient de l'environnement (`LOGIT_*`, fichier `/opt/logit/.env`).
