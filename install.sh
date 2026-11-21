@@ -154,13 +154,14 @@ fi
 [[ ! -e $DIR ]] || fail "$DIR existe déjà sans installation LogIT. Choisis un autre dossier avec LOGIT_INSTALL_DIR."
 
 # --- Type d'installation (installation neuve) ---------------------------------------------
-# 1. automatisée : aucune question, LogIT seul en HTTPS sur le port 6720 (indépendant des autres services) ;
+# 1. automatisée : aucune question. LogIT se branche sur le nginx, l'Apache ou le Caddy du serveur s'il y en a un ;
+#    sinon il installe son propre Caddy, en HTTPS sur 443 si le port est libre, sur 6720 sinon ;
 # 2. manuelle : adresses, port, ou branchement sur le reverse proxy du serveur.
 HTTPS_PORT_DEFAULT=6720
 INSTALL_KIND=auto
 if [[ $ASSUME_YES != 1 && -t 0 ]]; then
     step "Type d’installation"
-    info "1. Automatisée : aucune question, LogIT en HTTPS sur le port $HTTPS_PORT_DEFAULT (conseillé)"
+    info "1. Automatisée : aucune question ; se branche sur le reverse proxy du serveur s’il y en a un, sinon installe le sien (conseillé)"
     info "2. Manuelle : adresses d’accès, port, ou branchement sur le reverse proxy du serveur"
     ask "Ton choix (1 ou 2)" "1"
     case $REPLY in
@@ -171,9 +172,19 @@ if [[ $ASSUME_YES != 1 && -t 0 ]]; then
 fi
 [[ $INSTALL_KIND == manual ]] || ASSUME_YES=1
 ok "Installation $([[ $INSTALL_KIND == auto ]] && echo automatisée || echo manuelle)"
-# Port déjà pris : on s'arrête avant d'installer quoi que ce soit (prérequis, Docker).
-if [[ $INSTALL_KIND == auto && $PROXY_CHOICE == auto ]] && port_used "$HTTPS_PORT_DEFAULT"; then
-    fail "le port $HTTPS_PORT_DEFAULT est déjà utilisé ($(listener_of "$HTTPS_PORT_DEFAULT" || true)). Relance en installation manuelle pour choisir un autre port. Rien n’a été modifié."
+
+# Reverse proxy déjà présent sur 80/443 (nginx, Apache ou Caddy installés sur le serveur).
+L443=$(listener_of 443 || true); L80=$(listener_of 80 || true)
+host_proxy=""; host_label=""
+case "${L443:-$L80}" in
+    nginx*) [[ -d /etc/nginx ]] && command -v nginx >/dev/null && { host_proxy=nginx; host_label="nginx"; } ;;
+    apache2*|httpd*) command -v a2ensite >/dev/null && { host_proxy=apache; host_label="Apache"; } ;;
+    caddy*) [[ -f /etc/caddy/Caddyfile ]] && command -v caddy >/dev/null && { host_proxy=host-caddy; host_label="Caddy (système)"; } ;;
+esac
+# Automatisée sans proxy reconnu, 443 pris par un autre service : port 6720. S'il est pris aussi,
+# on s'arrête avant d'installer quoi que ce soit (prérequis, Docker).
+if [[ $INSTALL_KIND == auto && $PROXY_CHOICE == auto && -z $host_proxy && -n $L443 ]] && port_used "$HTTPS_PORT_DEFAULT"; then
+    fail "les ports 443 ($L443) et $HTTPS_PORT_DEFAULT ($(listener_of "$HTTPS_PORT_DEFAULT" || true)) sont déjà utilisés. Relance en installation manuelle pour choisir un autre port. Rien n’a été modifié."
 fi
 
 # --- 3. Prérequis -------------------------------------------------------------------------
@@ -200,7 +211,7 @@ else
     (( WSL == 0 )) || fail "Docker est absent de WSL. Active l’intégration WSL de Docker Desktop pour cette distribution, puis relance."
     conflicts=()
     for p in docker.io docker-compose docker-doc docker-buildx podman-docker containerd runc; do installed "$p" && conflicts+=("$p"); done
-    (( ${#conflicts[@]} == 0 )) || fail "paquets en conflit avec Docker Engine : ${conflicts[*]}. Retire-les (apt-get remove ${conflicts[*]}) puis relance."
+    (( ${#conflicts[@]} == 0 )) || fail "paquets en conflit avec Docker Engine : ${conflicts[*]}. Vérifie qu'aucun autre logiciel ne les utilise (apt-cache rdepends --installed ${conflicts[*]}), retire-les (apt-get remove ${conflicts[*]}), puis relance."
     info "Installation de Docker Engine depuis le dépôt officiel Docker"
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL --proto '=https' https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc >>"$LOG" 2>&1
@@ -256,17 +267,10 @@ ok "$HOSTS"
 
 # --- 5. Exposition -----------------------------------------------------------------------
 step "Exposition"
-L443=$(listener_of 443 || true); L80=$(listener_of 80 || true)
-host_proxy=""; host_label=""
-case "${L443:-$L80}" in
-    nginx*) [[ -d /etc/nginx ]] && command -v nginx >/dev/null && { host_proxy=nginx; host_label="nginx"; } ;;
-    apache2*|httpd*) command -v a2ensite >/dev/null && { host_proxy=apache; host_label="Apache"; } ;;
-    caddy*) [[ -f /etc/caddy/Caddyfile ]] && command -v caddy >/dev/null && { host_proxy=host-caddy; host_label="Caddy (système)"; } ;;
-esac
 if [[ $PROXY_CHOICE != auto ]]; then
     MODE=$PROXY_CHOICE                      # imposé par LOGIT_INSTALL_PROXY
 elif [[ $INSTALL_KIND == auto ]]; then
-    MODE=caddy                              # automatisée : toujours le port HTTPS dédié
+    MODE=${host_proxy:-caddy}               # automatisée : le proxy du serveur s'il y en a un, sinon Caddy intégré
 else
     MODE=caddy
     [[ -z ${L443:-$L80} ]] || info "1. Port HTTPS dédié : LogIT indépendant des autres services (Caddy intégré)"
@@ -293,7 +297,8 @@ PUBLIC_PORT=443; HTTP_PORT=80; APP_PORT=""
 case $MODE in
     caddy)
         PUBLIC_PORT=$HTTPS_PORT_DEFAULT
-        if [[ $INSTALL_KIND == manual ]]; then ask "Port HTTPS de LogIT" "$HTTPS_PORT_DEFAULT"; PUBLIC_PORT=$REPLY; fi
+        if [[ $INSTALL_KIND == manual ]]; then ask "Port HTTPS de LogIT" "$HTTPS_PORT_DEFAULT"; PUBLIC_PORT=$REPLY
+        elif [[ -z $L443 ]]; then PUBLIC_PORT=443; fi   # automatisée : 443 s'il est libre
         [[ $PUBLIC_PORT =~ ^[0-9]+$ ]] && (( PUBLIC_PORT >= 1 && PUBLIC_PORT <= 65535 )) || fail "port invalide : $PUBLIC_PORT."
         port_used "$PUBLIC_PORT" && fail "le port $PUBLIC_PORT est déjà utilisé ($(listener_of "$PUBLIC_PORT" || true)). Relance en installation manuelle pour en choisir un autre. LogIT n’a pas été installé."
         # Uniquement du HTTPS, sauf sur 443 : le port 80 (s'il est libre) redirige alors vers HTTPS.
