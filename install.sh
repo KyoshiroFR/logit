@@ -64,18 +64,28 @@ apt_install() {
     apt-get install -y -qq --no-install-recommends "$@" >>"$LOG" 2>&1
 }
 
+# Moteur de conteneurs : Docker, ou podman s'il est déjà là (Compose pilote alors podman par son service compatible).
+ENGINE=docker
+COMPOSE_PODMAN=/usr/libexec/docker/cli-plugins/docker-compose   # binaire Compose seul (paquet docker-compose-plugin)
+PODMAN_SOCKET=unix:///run/podman/podman.sock
+engine() { if [[ $ENGINE == podman ]]; then podman "$@"; else docker "$@"; fi; }
 compose() {
     local files=() f
     IFS=: read -ra list <<<"$(sed -n 's/^COMPOSE_FILE=//p' "$DIR/.env")"
     for f in "${list[@]}"; do files+=(-f "$f"); done
-    docker compose --project-name logit --project-directory "$DIR/deploy" --env-file "$DIR/.env" "${files[@]}" "$@"
+    if [[ $ENGINE == podman ]]; then
+        # Construction classique par podman : jamais de conteneur BuildKit lancé à côté des autres projets.
+        COMPOSE_BAKE=false DOCKER_BUILDKIT=0 DOCKER_HOST=$PODMAN_SOCKET "$COMPOSE_PODMAN" --project-name logit --project-directory "$DIR/deploy" --env-file "$DIR/.env" "${files[@]}" "$@"
+    else
+        docker compose --project-name logit --project-directory "$DIR/deploy" --env-file "$DIR/.env" "${files[@]}" "$@"
+    fi
 }
 
 wait_healthy() {  # attend que le conteneur de l'application soit « healthy »
     local id state
     for _ in $(seq 1 "${1:-120}"); do
         id=$(compose ps -q app 2>/dev/null || true)
-        state=$( [[ -n $id ]] && docker inspect -f '{{.State.Health.Status}}' "$id" 2>/dev/null || echo starting)
+        state=$( [[ -n $id ]] && engine inspect -f '{{.State.Health.Status}}' "$id" 2>/dev/null || echo starting)
         [[ $state == healthy ]] && return 0
         sleep 2
     done
@@ -108,7 +118,7 @@ MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 # --- 2. Installation existante ------------------------------------------------------------
 remove_incomplete() {
     # Une installation sans le marqueur .installed n'a jamais créé de compte : elle ne contient aucune donnée.
-    command -v docker >/dev/null && compose down --volumes --remove-orphans >>"$LOG" 2>&1 || true
+    command -v "$ENGINE" >/dev/null && compose down --volumes --remove-orphans >>"$LOG" 2>&1 || true
     local f
     for f in /etc/nginx/sites-enabled/logit.conf /etc/nginx/sites-available/logit.conf /etc/nginx/conf.d/logit.conf \
              /etc/apache2/sites-enabled/logit.conf /etc/apache2/sites-available/logit.conf /etc/caddy/logit.caddy; do
@@ -122,6 +132,7 @@ remove_incomplete() {
 }
 
 if [[ -f $DIR/.env ]]; then
+    ENGINE=$(sed -n 's/^LOGIT_ENGINE=//p' "$DIR/.env"); ENGINE=${ENGINE:-docker}
     step "Installation existante détectée dans $DIR"
     if [[ ! -f $DIR/.installed ]]; then
         warn "Installation précédente interrompue avant la création du compte administrateur : elle est vide."
@@ -129,7 +140,7 @@ if [[ -f $DIR/.env ]]; then
         [[ $REPLY == oui ]] || fail "installation interrompue conservée dans $DIR. Rien n’a été modifié."
         remove_incomplete
         ok "Installation interrompue supprimée"
-    elif command -v docker >/dev/null && [[ -n $(compose ps --status running -q app 2>/dev/null) ]]; then
+    elif command -v "$ENGINE" >/dev/null && [[ -n $(compose ps --status running -q app 2>/dev/null) ]]; then
         # Installation en service : la même commande la met à jour, avec la procédure de « logit update »
         # (sauvegarde, construction, migrations, intégrité, retour automatique en cas d'échec).
         # La procédure est prise dans la version cible, pas dans la commande « logit » déjà installée.
@@ -199,6 +210,22 @@ if [[ $INSTALL_KIND == auto && $PROXY_CHOICE == auto ]]; then
     ok "Domaine : $DOMAIN ($([[ -n $host_proxy ]] && echo "via $host_label, déjà installé" || echo "Caddy sera installé"))"
 fi
 
+add_docker_repo() {  # dépôt officiel Docker, signé
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL --proto '=https' https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc >>"$LOG" 2>&1
+    chmod a+r /etc/apt/keyrings/docker.asc
+    cat >/etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: $OS_CODE
+Components: stable
+Architectures: $ARCH
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+    chmod 644 /etc/apt/sources.list.d/docker.sources
+    APT_UPDATED=0
+}
+
 # --- 3. Prérequis -------------------------------------------------------------------------
 step "Prérequis"
 missing=()
@@ -206,8 +233,20 @@ for p in ca-certificates curl git openssl iproute2; do installed "$p" || missing
 if (( ${#missing[@]} )); then info "Installation : ${missing[*]}"; apt_install "${missing[@]}"; fi
 ok "Outils système présents"
 
-# Docker
-if command -v docker >/dev/null; then
+# Moteur de conteneurs : Docker s'il est là, sinon podman s'il est là (sans installer Docker à côté), sinon Docker.
+if command -v podman >/dev/null && ! { command -v docker >/dev/null && ! docker --version 2>/dev/null | grep -qi podman; }; then
+    ENGINE=podman
+    ok "podman présent ($(podman --version | sed 's/podman version //')) : LogIT l’utilise, Docker n’est pas installé"
+    systemctl enable --now podman.socket >>"$LOG" 2>&1 || fail "le service podman.socket ne démarre pas (voir $LOG)."
+    # Au démarrage du serveur, podman-restart relance les conteneurs « always » (LOGIT_RESTART=always dans .env).
+    systemctl enable podman-restart.service >>"$LOG" 2>&1 || warn "podman-restart.service non activé : LogIT ne redémarrera pas seul après un redémarrage du serveur."
+    if [[ ! -x $COMPOSE_PODMAN ]]; then
+        info "Ajout de l’outil Compose seul (paquet docker-compose-plugin, sans le moteur Docker)"
+        add_docker_repo
+        apt_install docker-compose-plugin
+    fi
+    DOCKER_HOST=$PODMAN_SOCKET "$COMPOSE_PODMAN" version >/dev/null 2>&1 || fail "Compose ne joint pas podman (voir $LOG)."
+elif command -v docker >/dev/null; then
     ok "Docker présent ($(docker --version | sed 's/Docker version //; s/,.*//'))"
     if ! docker compose version >/dev/null 2>&1; then
         if [[ -f /etc/apt/sources.list.d/docker.sources || -f /etc/apt/sources.list.d/docker.list ]]; then
@@ -225,24 +264,16 @@ else
     for p in docker.io docker-compose docker-doc docker-buildx podman-docker containerd runc; do installed "$p" && conflicts+=("$p"); done
     (( ${#conflicts[@]} == 0 )) || fail "paquets en conflit avec Docker Engine : ${conflicts[*]}. Vérifie qu'aucun autre logiciel ne les utilise (apt-cache rdepends --installed ${conflicts[*]}), retire-les (apt-get remove ${conflicts[*]}), puis relance."
     info "Installation de Docker Engine depuis le dépôt officiel Docker"
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL --proto '=https' https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc >>"$LOG" 2>&1
-    chmod a+r /etc/apt/keyrings/docker.asc
-    cat >/etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/debian
-Suites: $OS_CODE
-Components: stable
-Architectures: $ARCH
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-    chmod 644 /etc/apt/sources.list.d/docker.sources
-    APT_UPDATED=0
+    add_docker_repo
     apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     systemctl enable --now docker >>"$LOG" 2>&1
     ok "Docker installé"
 fi
-docker info >/dev/null 2>&1 || { (( WSL )) || systemctl start docker >>"$LOG" 2>&1; docker info >/dev/null 2>&1; } || fail "le service Docker ne répond pas."
+if [[ $ENGINE == docker ]]; then
+    docker info >/dev/null 2>&1 || { (( WSL )) || systemctl start docker >>"$LOG" 2>&1; docker info >/dev/null 2>&1; } || fail "le service Docker ne répond pas."
+else
+    podman info >/dev/null 2>&1 || fail "podman ne répond pas (voir $LOG)."
+fi
 
 # Heure : la date d'enregistrement des fiches vient de l'horloge de ce serveur.
 if (( WSL )); then
@@ -365,6 +396,8 @@ COMPOSE_FILES="$DIR/deploy/compose.yaml:$DIR/deploy/compose.caddy.yaml"
 {
     echo "# LogIT — généré le $(date -Iseconds). Contient des secrets : lisible par root uniquement."
     echo "COMPOSE_FILE=$COMPOSE_FILES"
+    echo "LOGIT_ENGINE=$ENGINE"
+    echo "LOGIT_RESTART=$([[ $ENGINE == podman ]] && echo always || echo unless-stopped)"
     echo "LOGIT_VERSION=$REF"
     echo "LOGIT_COMMIT=$COMMIT"
     echo "LOGIT_IMAGE=logit:${COMMIT:0:12}-$(date +%Y%m%d%H%M%S)"

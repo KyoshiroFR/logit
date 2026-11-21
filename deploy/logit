@@ -23,7 +23,11 @@ env_set() {  # remplace la valeur, ou l'ajoute si la clé n'existe pas encore (i
     else printf '%s=%s\n' "$1" "$2" >>"$LOGIT_DIR/.env"; fi
 }
 free_mb() { df -Pm "$1" | awk 'NR==2 {print $4}'; }
-image_id() { docker image inspect -f '{{.Id}}' "$1" 2>/dev/null || true; }
+# Moteur de conteneurs : Docker, ou podman (Compose le pilote alors par son service compatible).
+ENGINE=$(env_value LOGIT_ENGINE); ENGINE=${ENGINE:-docker}
+COMPOSE_PODMAN=/usr/libexec/docker/cli-plugins/docker-compose
+engine() { if [[ $ENGINE == podman ]]; then podman "$@"; else docker "$@"; fi; }
+image_id() { engine image inspect -f '{{.Id}}' "$1" 2>/dev/null || true; }
 port_used() { [[ -n $(ss -Hltn "sport = :$1" 2>/dev/null) ]]; }
 
 # Les ports de LogIT doivent être libres, ou tenus par ses propres conteneurs : sinon un autre service les a pris
@@ -45,7 +49,12 @@ compose() {
     local files=() f
     IFS=: read -ra list <<<"$(env_value COMPOSE_FILE)"
     for f in "${list[@]}"; do files+=(-f "$f"); done
-    docker compose --project-name logit --project-directory "$LOGIT_DIR/deploy" --env-file "$LOGIT_DIR/.env" "${files[@]}" "$@"
+    if [[ $ENGINE == podman ]]; then
+        # Construction classique par podman : jamais de conteneur BuildKit lancé à côté des autres projets.
+        COMPOSE_BAKE=false DOCKER_BUILDKIT=0 DOCKER_HOST=unix:///run/podman/podman.sock "$COMPOSE_PODMAN" --project-name logit --project-directory "$LOGIT_DIR/deploy" --env-file "$LOGIT_DIR/.env" "${files[@]}" "$@"
+    else
+        docker compose --project-name logit --project-directory "$LOGIT_DIR/deploy" --env-file "$LOGIT_DIR/.env" "${files[@]}" "$@"
+    fi
 }
 manage() { compose exec -T app logit-entrypoint "$@"; }
 journal() {  # journal <action> <détails JSON> : trace l'opération dans le journal de sécurité de LogIT
@@ -56,7 +65,7 @@ wait_healthy() {
     local id
     for _ in $(seq 1 "${1:-90}"); do
         id=$(compose ps -q app 2>/dev/null || true)
-        [[ -n $id && $(docker inspect -f '{{.State.Health.Status}}' "$id" 2>/dev/null) == healthy ]] && return 0
+        [[ -n $id && $(engine inspect -f '{{.State.Health.Status}}' "$id" 2>/dev/null) == healthy ]] && return 0
         sleep 2
     done
     return 1
@@ -120,7 +129,8 @@ update() {
 
     # Espace disque, avant tout téléchargement : construction de l'image et sauvegarde.
     local docker_root last_dump need_mb
-    docker_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+    if [[ $ENGINE == podman ]]; then docker_root=$(podman info -f '{{.Store.GraphRoot}}' 2>/dev/null || echo /var/lib/containers)
+    else docker_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker); fi
     (( $(free_mb "$docker_root") >= 3072 )) || die "3 Go libres nécessaires dans $docker_root (disponible : $(free_mb "$docker_root") Mo). Rien n’a été modifié."
     install -d -m 700 "$BACKUP_DIR"
     last_dump=$(ls -1t "$BACKUP_DIR"/logit-*.dump 2>/dev/null | head -n1 || true)
@@ -136,7 +146,7 @@ update() {
     base_images+=("$(git -C "$LOGIT_DIR" show "$new_commit:Dockerfile" | sed -n 's/^FROM \([^ ]*\).*/\1/p' | head -n1)")
     for img in "${base_images[@]}"; do before+=("$(image_id "$img")"); done
     for img in "${base_images[@]}"; do
-        docker pull --quiet "$img" >>"$LOG" 2>&1 || die "impossible de télécharger $img. Rien n’a été modifié."
+        engine pull --quiet "$img" >>"$LOG" 2>&1 || die "impossible de télécharger $img. Rien n’a été modifié."
     done
     for i in "${!base_images[@]}"; do
         [[ $(image_id "${base_images[$i]}") == "${before[$i]}" ]] || changed+=("${base_images[$i]}")
@@ -199,8 +209,9 @@ update() {
         local old
         while read -r old; do
             [[ $old == "$new_image" || $old == "$current_image" ]] && continue
-            docker rmi "$old" >>"$LOG" 2>&1 && log_line "    image supprimée : $old" || true
-        done < <(docker image ls logit --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -v ':<none>$' || true)
+            engine rmi "$old" >>"$LOG" 2>&1 && log_line "    image supprimée : $old" || true
+        # podman préfixe les images construites localement par « localhost/ » : on compare sans ce préfixe.
+        done < <(engine image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | sed 's#^localhost/##' | grep '^logit:' | grep -v ':<none>$' || true)
         journal version_updated "{\"de\": \"$current_ref\", \"vers\": \"$target\", \"commit\": \"$new_commit\", \"images\": \"${changed[*]}\", \"sauvegarde\": \"$dump\"}"
         ok "LogIT est à jour : $target (commit ${new_commit:0:12}). Intégrité vérifiée."
         return 0

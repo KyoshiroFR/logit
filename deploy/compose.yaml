@@ -15,8 +15,8 @@ x-app-env: &app-env
 
 services:
   db:
-    image: postgres:17-alpine
-    restart: unless-stopped
+    image: docker.io/library/postgres:17-alpine
+    restart: ${LOGIT_RESTART:-unless-stopped}
     environment:
       POSTGRES_DB: logit
       POSTGRES_USER: logit_owner
@@ -48,7 +48,15 @@ services:
 
   app:
     image: ${LOGIT_IMAGE:-logit:local}
-    restart: unless-stopped
+    restart: ${LOGIT_RESTART:-unless-stopped}  # « always » avec podman : seul ce cas est relancé au démarrage du serveur
+    # Contrôle de santé explicite : podman construit au format OCI, qui ignore le HEALTHCHECK du Dockerfile.
+    healthcheck:
+      # Forme CMD-SHELL : podman découpe aux espaces la forme CMD en tableau quand elle lui arrive par Compose.
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/sante/\", timeout=3)'"]
+      interval: 10s
+      timeout: 3s
+      start_period: 20s
+      retries: 5
     environment: *app-env
     depends_on:
       migrate: {condition: service_completed_successfully}
