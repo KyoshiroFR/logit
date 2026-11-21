@@ -95,7 +95,8 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
   - la ligne `listen [::]` de nginx n'est écrite que si IPv6 est actif ;
   - un site ajouté à nginx, Apache ou Caddy est retiré si le proxy refuse la configuration ;
   - une installation sans marqueur `.installed` est jugée vide et refaite ; avec le marqueur, elle n'est jamais effacée ;
-  - installation automatisée : aucune question ; proxy du serveur (nginx, Apache, Caddy) s'il y en a un, sinon Caddy intégré sur 443, ou 6720 si 443 est pris ; si 443 et 6720 sont pris, arrêt avant d'installer quoi que ce soit ;
+  - installation automatisée : seul le domaine est demandé (sans terminal : `LOGIT_INSTALL_HOSTS`) ; LogIT sur 127.0.0.1:6720 ; site pour ce seul domaine dans le proxy du serveur, ou Caddy installé ; service inconnu sur 80/443, port 6720 pris ou domaine invalide : arrêt avant d'installer quoi que ce soit ;
+  - certificat Let's Encrypt : Caddy le gère seul (pas de `tls internal` pour un domaine) ; nginx et Apache servent `/.well-known/acme-challenge/` en HTTP depuis `/var/www/logit-acme` (le reste redirige vers HTTPS) pour `certbot --webroot`, avec rechargement du proxy à chaque renouvellement ; en cas d'échec, certificat auto-signé et commande pour réessayer ;
   - le port 80 du Caddy intégré n'est publié (redirection) que sur 443, par `compose.caddy-http.yaml` ; une installation existante qui l'avait le garde après mise à jour ;
   - `logit update` s'arrête avant toute modification si un port de LogIT est pris par un autre service ;
   - une mise à jour fait une sauvegarde avant, refuse une version plus ancienne et revient automatiquement en arrière (code et base) si le démarrage échoue ;
