@@ -325,6 +325,7 @@ div.stat { cursor: default; }
 
 /* ── Tableaux, listes, pagination ────────────────────────────────────── */
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.card:has(> table) { overflow-x: auto; }  /* sur mobile, le tableau défile dans sa carte */
 th, td { text-align: left; padding: .6rem .65rem; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 600; }
 tbody tr { transition: background var(--fast); }
@@ -341,7 +342,8 @@ tbody tr:hover td { background: var(--surface-2); }
 /* ── Fiche complète ──────────────────────────────────────────────────── */
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1.1rem; margin: 0; font-size: .9rem; }
 .facts dt { color: var(--muted); font-weight: 600; }
-.facts dd { margin: 0; color: var(--text-2); }
+.facts dd { margin: 0; color: var(--text-2); min-width: 0; }
+.facts .when, .facts .tag { white-space: normal; }  /* dates et étiquettes longues : passage à la ligne sur mobile */
 .diff { font-family: var(--mono); font-size: .82rem; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: auto; margin: .3rem 0 .8rem; background: var(--bg-2); }
 .diff div { padding: 0 .7rem; white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.45em; color: var(--text-2); }
 .diff .added { background: var(--added); color: #b6f2cf; }
