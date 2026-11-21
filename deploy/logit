@@ -5,17 +5,25 @@ set -Eeuo pipefail
 LOGIT_DIR=/opt/logit
 BACKUP_DIR=/var/backups/logit
 RETENTION_DAYS=30
+LOG=/var/log/logit-install.log  # journal commun à l'installation et aux mises à jour, complété à chaque opération
 
 (( EUID == 0 )) || { echo "À lancer en root (sudo logit …)." >&2; exit 1; }
 [[ -f $LOGIT_DIR/.env ]] || { echo "LogIT introuvable dans $LOGIT_DIR." >&2; exit 1; }
 
 if [[ -t 1 ]]; then B=$'\e[1m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; N=$'\e[0m'; else B='' G='' Y='' R='' N=''; fi
-say()  { printf '%s==>%s %s\n' "$B" "$N" "$*"; }
-ok()   { printf '    %s✔%s %s\n' "$G" "$N" "$*"; }
-die()  { printf '%sErreur :%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
+LOGGING=0  # 1 pendant une mise à jour : les messages sont aussi écrits dans $LOG
+log_line() { if (( LOGGING )); then printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; fi; }
+say()  { printf '%s==>%s %s\n' "$B" "$N" "$*"; log_line "==> $*"; }
+ok()   { printf '    %s✔%s %s\n' "$G" "$N" "$*"; log_line "    ok : $*"; }
+die()  { printf '%sErreur :%s %s\n' "$R" "$N" "$*" >&2; log_line "ERREUR : $*"; exit 1; }
 
 env_value() { sed -n "s/^$1=//p" "$LOGIT_DIR/.env" | tr -d '"'; }
-env_set() { sed -i "s|^$1=.*|$1=$2|" "$LOGIT_DIR/.env"; }
+env_set() {  # remplace la valeur, ou l'ajoute si la clé n'existe pas encore (installations antérieures)
+    if grep -q "^$1=" "$LOGIT_DIR/.env"; then sed -i "s|^$1=.*|$1=$2|" "$LOGIT_DIR/.env"
+    else printf '%s=%s\n' "$1" "$2" >>"$LOGIT_DIR/.env"; fi
+}
+free_mb() { df -Pm "$1" | awk 'NR==2 {print $4}'; }
+image_id() { docker image inspect -f '{{.Id}}' "$1" 2>/dev/null || true; }
 compose() {
     local files=() f
     IFS=: read -ra list <<<"$(env_value COMPOSE_FILE)"
@@ -47,6 +55,9 @@ backup() {  # affiche le chemin de la sauvegarde
     install -d -m 700 "$BACKUP_DIR"
     local file
     file="$BACKUP_DIR/logit-$(date +%Y%m%d-%H%M%S).dump"
+    while [[ -e $file || -e $file.part ]]; do  # jamais écraser une sauvegarde existante
+        sleep 1; file="$BACKUP_DIR/logit-$(date +%Y%m%d-%H%M%S).dump"
+    done
     compose exec -T db pg_dump -U logit_owner -d logit --format=custom >"$file.part"
     mv "$file.part" "$file"; chmod 600 "$file"
     find "$BACKUP_DIR" -name 'logit-*.dump' -mtime +"$RETENTION_DAYS" -delete
@@ -67,8 +78,14 @@ update() {
     for arg in "$@"; do
         case $arg in --yes|-y) assume_yes=1 ;; *) target=$arg ;; esac
     done
-    local current_ref current_commit
+    local current_ref current_commit current_image
     current_ref=$(env_value LOGIT_VERSION); current_commit=$(env_value LOGIT_COMMIT)
+    # Installations antérieures à la 0.1.1 : l'image portait le nom de la version.
+    current_image=$(env_value LOGIT_IMAGE); [[ -n $current_image ]] || current_image="logit:$current_ref"
+
+    touch "$LOG"; chmod 600 "$LOG"
+    LOGGING=1
+    printf '\n===== %s — logit update %s =====\n' "$(date -Iseconds)" "$*" >>"$LOG"
 
     say "Recherche de la version"
     if [[ -z $target ]]; then
@@ -80,18 +97,42 @@ update() {
         [[ $(printf '%s\n%s\n' "$target" "$current_ref" | sort -V | head -n1) == "$target" ]]; then
         die "$target est plus ancienne que $current_ref. Revenir en arrière se fait en restaurant une sauvegarde (logit restore)."
     fi
-    (umask 022 && git -C "$LOGIT_DIR" fetch --quiet --depth 1 origin "$target") || die "version $target introuvable sur le dépôt."
+    (umask 022 && git -C "$LOGIT_DIR" fetch --quiet --depth 1 origin "$target") >>"$LOG" 2>&1 || die "version $target introuvable sur le dépôt."
     local new_commit
     new_commit=$(git -C "$LOGIT_DIR" rev-parse FETCH_HEAD)
-    if [[ $new_commit == "$current_commit" ]]; then
-        ok "Déjà à jour : $current_ref (commit ${current_commit:0:12})."
+
+    # Espace disque, avant tout téléchargement : construction de l'image et sauvegarde.
+    local docker_root last_dump need_mb
+    docker_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+    (( $(free_mb "$docker_root") >= 3072 )) || die "3 Go libres nécessaires dans $docker_root (disponible : $(free_mb "$docker_root") Mo). Rien n’a été modifié."
+    install -d -m 700 "$BACKUP_DIR"
+    last_dump=$(ls -1t "$BACKUP_DIR"/logit-*.dump 2>/dev/null | head -n1 || true)
+    need_mb=100; [[ -z $last_dump ]] || need_mb=$(( $(du -m "$last_dump" | cut -f1) * 2 + 100 ))
+    (( $(free_mb "$BACKUP_DIR") >= need_mb )) || die "${need_mb} Mo libres nécessaires dans $BACKUP_DIR pour la sauvegarde (disponible : $(free_mb "$BACKUP_DIR") Mo). Rien n’a été modifié."
+
+    # Correctifs de sécurité des images de base (PostgreSQL, Caddy, Python), même sans nouvelle version de LogIT.
+    say "Recherche des correctifs de sécurité des images"
+    local base_images=() img before=() changed=()
+    mapfile -t base_images < <(compose config --images 2>/dev/null | grep -v '^logit:' || true)
+    base_images+=("$(git -C "$LOGIT_DIR" show "$new_commit:Dockerfile" | sed -n 's/^FROM \([^ ]*\).*/\1/p' | head -n1)")
+    for img in "${base_images[@]}"; do before+=("$(image_id "$img")"); done
+    for img in "${base_images[@]}"; do
+        docker pull --quiet "$img" >>"$LOG" 2>&1 || die "impossible de télécharger $img. Rien n’a été modifié."
+    done
+    for i in "${!base_images[@]}"; do
+        [[ $(image_id "${base_images[$i]}") == "${before[$i]}" ]] || changed+=("${base_images[$i]}")
+    done
+
+    if [[ $new_commit == "$current_commit" ]] && (( ${#changed[@]} == 0 )); then
+        ok "Déjà à jour : $current_ref (commit ${current_commit:0:12}), images comprises."
         return 0
     fi
     printf '    Installée : %s (commit %s)\n    Cible     : %s (commit %s)\n' \
         "$current_ref" "${current_commit:0:12}" "$target" "${new_commit:0:12}"
+    (( ${#changed[@]} == 0 )) || printf '    Correctifs d’images : %s\n' "${changed[*]}"
     if (( ! assume_yes )) && [[ -t 0 ]]; then
         read -r -p "    Mettre à jour ? Une sauvegarde est faite avant. (oui/non) [oui] : " answer
-        [[ ${answer:-oui} == oui ]] || { echo "Abandon."; return 1; }
+        [[ ${answer:-oui} == oui ]] || { echo "Abandon."; log_line "abandon par l'opérateur"; return 1; }
     fi
 
     say "Sauvegarde avant mise à jour"
@@ -100,35 +141,52 @@ update() {
     ok "$dump"
 
     say "Récupération du code $target"
+    # Copie de .env : le retour automatique remet exactement la configuration d'avant.
+    cp -p "$LOGIT_DIR/.env" "$LOGIT_DIR/.env.avant-maj"
     (umask 022 && git -C "$LOGIT_DIR" checkout --quiet --detach FETCH_HEAD)
+    # Une image par construction (commit + date) : celle d'avant reste intacte pour le retour automatique.
+    local new_image
+    new_image="logit:${new_commit:0:12}-$(date +%Y%m%d%H%M%S)"
+    while [[ $new_image == "$current_image" || -n $(image_id "$new_image") ]]; do  # jamais réutiliser un nom d'image
+        sleep 1; new_image="logit:${new_commit:0:12}-$(date +%Y%m%d%H%M%S)"
+    done
     env_set LOGIT_VERSION "$target"; env_set LOGIT_COMMIT "$new_commit"
+    env_set LOGIT_IMAGE "$new_image"; env_set LOGIT_IMAGE_PRECEDENTE "$current_image"
 
     revert_code() {
         (umask 022 && git -C "$LOGIT_DIR" checkout --quiet --detach "$current_commit")
-        env_set LOGIT_VERSION "$current_ref"; env_set LOGIT_COMMIT "$current_commit"
+        mv -f "$LOGIT_DIR/.env.avant-maj" "$LOGIT_DIR/.env"
     }
 
     say "Construction de l’image"
-    if ! compose build >/dev/null 2>&1; then
+    if ! compose build >>"$LOG" 2>&1; then
         revert_code
         die "la construction de $target a échoué. Rien n’a été modifié : LogIT tourne toujours en $current_ref."
     fi
 
     say "Redémarrage et migrations"
-    if compose up -d >/dev/null 2>&1 && wait_healthy 120 && manage verify_chain >/dev/null 2>&1; then
+    if compose up -d >>"$LOG" 2>&1 && wait_healthy 120 && manage verify_chain >>"$LOG" 2>&1; then
+        rm -f "$LOGIT_DIR/.env.avant-maj"
         install -m 0755 "$LOGIT_DIR/deploy/logit" /usr/local/bin/logit.new
         sed -i "s|^LOGIT_DIR=.*|LOGIT_DIR=$LOGIT_DIR|" /usr/local/bin/logit.new
         mv /usr/local/bin/logit.new /usr/local/bin/logit
-        journal version_updated "{\"de\": \"$current_ref\", \"vers\": \"$target\", \"commit\": \"$new_commit\", \"sauvegarde\": \"$dump\"}"
+        # On garde l'image en service et la précédente (retour arrière) ; les plus anciennes sont supprimées.
+        local old
+        while read -r old; do
+            [[ $old == "$new_image" || $old == "$current_image" ]] && continue
+            docker rmi "$old" >>"$LOG" 2>&1 && log_line "    image supprimée : $old" || true
+        done < <(docker image ls logit --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -v ':<none>$' || true)
+        journal version_updated "{\"de\": \"$current_ref\", \"vers\": \"$target\", \"commit\": \"$new_commit\", \"images\": \"${changed[*]}\", \"sauvegarde\": \"$dump\"}"
         ok "LogIT est à jour : $target (commit ${new_commit:0:12}). Intégrité vérifiée."
         return 0
     fi
 
     printf '\n%s!%s Échec du démarrage de %s. Retour automatique à %s…\n' "$Y" "$N" "$target" "$current_ref" >&2
-    compose logs --no-color --tail 15 migrate app 2>&1 | sed 's/^/    /' >&2 || true
+    log_line "échec du démarrage de $target : retour automatique à $current_ref"
+    compose logs --no-color --tail 15 migrate app 2>&1 | tee -a "$LOG" | sed 's/^/    /' >&2 || true
     revert_code
-    restore_db "$dump"
-    compose up -d >/dev/null 2>&1 || true
+    restore_db "$dump" >>"$LOG" 2>&1
+    compose up -d >>"$LOG" 2>&1 || true
     if wait_healthy 120; then
         journal version_update_failed "{\"de\": \"$current_ref\", \"vers\": \"$target\", \"retour\": \"automatique\", \"sauvegarde\": \"$dump\"}"
         die "mise à jour annulée. LogIT est revenu à $current_ref avec la base d’avant la mise à jour ($dump)."
