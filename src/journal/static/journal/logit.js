@@ -94,6 +94,24 @@ function initSegmented(root = document) {
   });
 }
 
+// ── Chiffres clés : le compteur monte jusqu'à sa valeur au chargement ──────────────────
+function initStats() {
+  if (reduceMotion) return;
+  document.querySelectorAll(".stat strong").forEach((number) => {
+    const target = parseInt(number.textContent, 10);
+    if (!(target > 0)) return;
+    const duration = 350;
+    const start = performance.now();
+    const step = (now) => {
+      const t = Math.min((now - start) / duration, 1);
+      number.textContent = String(Math.round(target * (1 - (1 - t) ** 3)));  // ralentit à l'arrivée
+      if (t < 1) requestAnimationFrame(step);
+    };
+    number.textContent = "0";
+    requestAnimationFrame(step);
+  });
+}
+
 // ── Registre : filtrage dynamique sans rechargement ───────────────────────────────────
 function initLiveFilters() {
   const form = document.getElementById("filters");
@@ -260,6 +278,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initMenu();  // avant initNav : l'indicateur se place sur la mise en page définitive
   initNav();
   initSegmented();
+  initStats();
   initLiveFilters();
   initEntries();
   initForm();

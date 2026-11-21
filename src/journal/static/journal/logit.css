@@ -187,13 +187,20 @@ select { appearance: none; padding-right: 2rem;
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
 
 /* ── Bandeau de synthèse ─────────────────────────────────────────────── */
-.pulse-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
-.stat { display: flex; align-items: center; gap: .85rem; padding: .8rem 1rem; background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); color: var(--text); transition: border-color var(--fast), transform var(--fast) var(--ease); }
-a.stat:hover { border-color: var(--border-strong); transform: translateY(-1px); color: var(--text); }
-.stat strong { font-size: 1.45rem; font-variant-numeric: tabular-nums; line-height: 1; }
-.stat span { color: var(--muted); font-size: .86rem; }
-.stat.watch strong { color: var(--watch); } .stat.info strong { color: var(--info); } .stat.accent strong { color: var(--accent-2); }
+.pulse-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .9rem; margin-bottom: 1.25rem; }
+.stat { --c: var(--accent-2); position: relative; overflow: hidden; display: flex; flex-direction: column; gap: .35rem; padding: 1.05rem 1.2rem 1.1rem;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; color: var(--text);
+  transition: border-color var(--mid) var(--ease), transform var(--mid) var(--ease); }
+/* Halo de couleur dans l'angle, plus intense au survol (opacité seulement) */
+.stat::before { content: ""; position: absolute; inset: -40% -30% auto auto; width: 70%; aspect-ratio: 1; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--c) 28%, transparent), transparent); opacity: .55; transition: opacity var(--mid) var(--ease); }
+a.stat:hover { border-color: color-mix(in srgb, var(--c) 45%, var(--border)); transform: translateY(-3px); color: var(--text); }
+a.stat:hover::before { opacity: 1; }
+.stat strong { position: relative; font-size: 2.3rem; font-weight: 750; letter-spacing: -.03em; line-height: 1; color: var(--c); font-variant-numeric: tabular-nums; }
+.stat span { position: relative; color: var(--muted); font-size: .86rem; line-height: 1.35; }
+.stat.watch { --c: var(--watch); } .stat.info { --c: var(--info); } .stat.accent { --c: var(--accent-2); }
+.stat.zero strong { color: var(--faint); }
+@media (max-width: 560px) { .pulse-strip { gap: .5rem; } .stat { padding: .8rem .8rem .85rem; border-radius: 12px; } .stat strong { font-size: 1.75rem; } .stat span { font-size: .78rem; } }
 
 /* ── Barre de filtres ────────────────────────────────────────────────── */
 .filters { display: grid; grid-template-columns: minmax(240px, 2fr) minmax(200px, 1fr); gap: .85rem 1rem; align-items: end;
