@@ -1,6 +1,8 @@
 """Authentification : verrouillage, TOTP avec codes de secours, mot de passe initial imposé."""
 import hashlib
+import logging
 import secrets
+import time
 from datetime import timedelta
 
 import pyotp
@@ -116,10 +118,32 @@ def ip_locked(request):
     return bool(ip) and AuditEvent.objects.filter(action="ip_locked", ip=ip, recorded_at__gt=_window_start()).exists()
 
 
+# Journal lu par fail2ban. Chaque ligne ne contient que la date (UTC), l'IP et un motif fixe : jamais de
+# texte saisi par le visiteur, sinon un identifiant forgé (« x ip=1.2.3.4 ») ferait bannir l'IP d'un tiers.
+FAIL2BAN_REASONS = {"mot de passe": "mot-de-passe", "compte inconnu": "compte-inconnu", "code TOTP": "code-totp"}
+
+
+class _UTCFormatter(logging.Formatter):
+    converter = time.gmtime
+
+
+def _fail2ban_log():
+    logger = logging.getLogger("logit.fail2ban")
+    if not logger.handlers and settings.LOGIT_SECURITY_LOG:
+        handler = logging.FileHandler(settings.LOGIT_SECURITY_LOG, encoding="utf-8", delay=True)
+        handler.setFormatter(_UTCFormatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+    return logger
+
+
 def register_failure(request, target, reason):
     """Inscrit l'échec ; au-delà de LOGIT_LOCKOUT_ATTEMPTS échecs récents depuis la même IP, la bloque."""
     record_event("login_failed", target=target, details={"raison": reason}, request=request)
     ip = client_ip(request)
+    if ip and settings.LOGIT_SECURITY_LOG:  # un fichier illisible ou absent n'empêche jamais la connexion
+        _fail2ban_log().warning("LogIT échec de connexion ip=%s motif=%s", ip, FAIL2BAN_REASONS.get(reason, "autre"))
     if not ip or ip_locked(request):
         return
     failures = AuditEvent.objects.filter(action="login_failed", ip=ip, recorded_at__gt=_window_start()).count()

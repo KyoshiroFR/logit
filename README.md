@@ -35,6 +35,7 @@ Il analyse le serveur et s’adapte :
 | **Caddy** (système) | ajoute un fichier importé, sauvegarde le Caddyfile d’origine, valide puis recharge |
 | un autre service sur 80/443 | fait écouter LogIT en local et t’indique la route à ajouter dans ton proxy |
 | un pare-feu ufw actif | t’indique la règle à ajouter (il ne modifie pas tes règles) |
+| fail2ban absent | l’installe, puis ajoute la règle « logit » : 5 échecs de connexion en 15 minutes depuis une IP la bannissent 15 minutes sur les ports web (jamais SSH) ; une règle refusée par fail2ban est retirée |
 | LogIT déjà installé et à jour | ne modifie rien |
 | LogIT déjà installé, version plus ancienne | le met à jour (voir « Mise à jour ») |
 
@@ -65,6 +66,7 @@ logit restore <fichier> restaure une sauvegarde (l’état actuel est sauvegard�
 logit update [version]  met à jour (dernière version publiée par défaut)
 logit verify            vérifie la chaîne d’empreintes
 logit ca                certificat à importer sur les postes pour éviter l’alerte du navigateur
+logit fail2ban          installe fail2ban si besoin et (re)pose la règle « logit »
 ```
 
 ## Mise à jour
@@ -128,7 +130,7 @@ Dans l’ordre : contrôle de l’espace disque, téléchargement des correctifs
 
 ### Sécurité et traçabilité
 
-- Comptes nominatifs, mot de passe initial imposé (12 caractères minimum), **TOTP** imposable par compte avec 10 codes de secours à usage unique, après 5 échecs en 15 minutes depuis une même adresse IP, cette adresse est bloquée 15 minutes (le compte, lui, n’est jamais verrouillé : personne ne peut bloquer l’accès d’un collègue), session limitée à 8 heures.
+- Comptes nominatifs, mot de passe initial imposé (12 caractères minimum), **TOTP** imposable par compte avec 10 codes de secours à usage unique, après 5 échecs en 15 minutes depuis une même adresse IP, fail2ban bannit cette adresse 15 minutes (débloquer : `fail2ban-client set logit unbanip <IP>`) ; LogIT bloque lui-même l’adresse au-delà de 10 échecs, si fail2ban ne joue pas son rôle. Le compte, lui, n’est jamais verrouillé : personne ne peut bloquer l’accès d’un collègue, session limitée à 8 heures.
 - **Journal de sécurité** : connexions réussies et échouées, verrouillages, création et modification de comptes, réinitialisations, référentiel.
 - **Traces immuables au niveau de PostgreSQL** :
   - l’application se connecte avec un compte qui n’a que les droits de lecture et d’ajout sur les fiches, leurs versions et le journal ;

@@ -44,7 +44,7 @@ Scripts shell : `bash -n` et `shellcheck` sur `install.sh` et `deploy/logit`.
   - `models.py` : une fiche (`Intervention`) est une suite de `Version`. Corriger, marquer réalisée ou annuler ajoute une version (auteur, date serveur, motif obligatoire). Deux dates : `occurred_at` (déclarée) et `recorded_at` (serveur, non modifiable).
   - `chain.py` : chaîne d'empreintes SHA-256 sur les versions et le journal de sécurité (`AuditEvent`), vérifiée par `manage.py verify_chain` / `logit verify` / page Intégrité.
   - `permissions.py` : rôles admin (`is_superuser`), groupes « Contributeur » et « Lecteur ».
-  - `security.py` : CSP stricte, blocage par adresse IP (jamais par compte), TOTP. `bugs.py` : signalements (`BugReport`, table modifiable, pas une trace).
+  - `security.py` : CSP stricte, blocage par adresse IP (jamais par compte : fail2ban dès 5 échecs, LogIT au-delà de 10), TOTP. `bugs.py` : signalements (`BugReport`, table modifiable, pas une trace).
   - `management/commands/` : `secure_db` (droits PostgreSQL), `verify_chain`, `audit_event`, `bootstrap_admin`.
 - `deploy/` : `compose.yaml` (db, migrate à usage unique, app), `compose.caddy.yaml` (Caddy intégré) ou `compose.port.yaml` (derrière le proxy du serveur), `entrypoint.sh`, et `logit` (commande d'exploitation installée dans `/usr/local/bin`).
 - `install.sh` : installe, ou met à jour si LogIT tourne déjà (il lance alors `logit update` de la version cible).
@@ -56,5 +56,6 @@ Scripts shell : `bash -n` et `shellcheck` sur `install.sh` et `deploy/logit`.
 - **Ne jamais changer le calcul d'empreinte des champs existants** (`Version.payload`, `AuditEvent.payload`). Une nouvelle clé s'ajoute seulement si elle est renseignée (comme `attachments`, `category`, `rollback_of`), sinon toutes les fiches existantes deviennent « altérées ».
 - **Le mot de passe propriétaire PostgreSQL n'est jamais dans le conteneur `app`** : seul le service `migrate` le reçoit.
 - **CSP** : aucun script ni style en ligne, aucun attribut `style=""` dans les gabarits (vérifié par `test_aucun_style_ni_script_en_ligne_dans_les_gabarits`). Icônes en SVG dans la page.
+- **Journal fail2ban** (`/var/log/logit/securite.log`) : chaque ligne ne contient que la date, l'IP et un motif fixe, jamais de texte saisi par le visiteur (sinon un identifiant forgé ferait bannir l'IP d'un tiers).
 - **Une mise à jour ne perd jamais de données** : sauvegarde avant, retour automatique (code, `.env`, base) en cas d'échec.
 - `install.sh` : `LOGIT_DEFAULT_REF` pointe sur la branche elle-même pendant les tests, sur le tag à la publication ; `LOGIT_DEFAULT_COMMIT` reçoit l'empreinte du commit du tag dans un commit suivant sur `main`.

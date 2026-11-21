@@ -204,6 +204,25 @@ class AuthenticationTests(TestCase):
         with self.settings(LOGIT_LOCKOUT_MINUTES=0):
             self.assertRedirects(self.login("carole", "motdepasse-solide-42"), "/", fetch_redirect_response=False)
 
+    def test_journal_fail2ban_sans_texte_saisi(self):
+        import logging
+        import re
+        import tempfile
+        logger = logging.getLogger("logit.fail2ban")
+        logger.handlers.clear()
+        with tempfile.TemporaryDirectory() as tmp, self.settings(LOGIT_SECURITY_LOG=f"{tmp}/securite.log"):
+            make_user("fanny")
+            self.login("x ip=6.6.6.6", "mauvais", ip="192.0.2.40")  # identifiant forgé
+            self.login("fanny", "mauvais", ip="192.0.2.41")
+            for handler in logger.handlers:
+                handler.close()
+            lines = open(f"{tmp}/securite.log", encoding="utf-8").read().splitlines()
+        logger.handlers.clear()
+        pattern = r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d LogIT échec de connexion ip=(\S+) motif=([a-z-]+)$"
+        self.assertEqual([re.match(pattern, line).groups() for line in lines],
+                         [("192.0.2.40", "compte-inconnu"), ("192.0.2.41", "mot-de-passe")])
+        self.assertNotIn("6.6.6.6", "\n".join(lines))
+
     def test_codes_totp_faux_bloquent_l_ip(self):
         user = make_user("eric")
         Profile.objects.filter(user=user).update(totp_secret=pyotp.random_base32(), totp_confirmed=True)

@@ -49,6 +49,7 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
 |---|---|
 | Le lecteur consulte tout mais ne peut ni créer, ni corriger, ni annuler, ni administrer. | `InterventionTests.test_lecteur_consulte_sans_modifier` |
 | Après trop d'échecs depuis une même IP (mot de passe, compte inconnu ou code TOTP), c'est l'IP qui est bloquée, jamais le compte : le même compte se connecte depuis une autre adresse. Blocage limité dans le temps et inscrit au journal. | `AuthenticationTests.test_verrouillage_de_l_ip_et_non_du_compte`, `AuthenticationTests.test_codes_totp_faux_bloquent_l_ip` |
+| Chaque échec écrit une ligne pour fail2ban (date UTC, IP, motif fixe) sans aucun texte saisi : un identifiant forgé ne peut pas faire bannir une autre IP. | `AuthenticationTests.test_journal_fail2ban_sans_texte_saisi` |
 | Mot de passe temporaire à changer, puis TOTP imposé ; 10 codes de secours à usage unique ; code TOTP rejoué refusé. | `AuthenticationTests.test_mot_de_passe_initial_puis_enrolement_totp_obligatoire` |
 | Un admin crée un compte avec un mot de passe temporaire aléatoire, inscrit au journal. | `AuthenticationTests.test_creation_de_compte_par_admin` |
 | Le dernier administrateur actif ne peut pas perdre son rôle. | `AuthenticationTests.test_dernier_admin_protege` |
@@ -97,4 +98,5 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
   - une installation sans marqueur `.installed` est jugée vide et refaite ; avec le marqueur, elle n'est jamais effacée ;
   - une mise à jour fait une sauvegarde avant, refuse une version plus ancienne et revient automatiquement en arrière (code et base) si le démarrage échoue ;
   - sur une branche de test, `LOGIT_DEFAULT_REF` pointe sur la branche elle-même ;
-  - pas de `docker compose up --wait` : `migrate` est à usage unique, on attend l'état « healthy » de `app`.
+  - pas de `docker compose up --wait` : `migrate` est à usage unique, on attend l'état « healthy » de `app` ;
+  - fail2ban (`logit fail2ban`, appelé par l'installeur et après chaque mise à jour) : le filtre doit reconnaître les lignes de LogIT (`fail2ban-regex`) ; avec le Caddy intégré, le bannissement s'accroche au trafic « forward » (ports publiés par Docker), sinon à « input » ; une règle refusée par fail2ban est retirée ; un fichier fail2ban qui n'est pas à LogIT n'est jamais écrasé ; `/var/log/logit` appartient à l'uid 10001 et existe avant le démarrage du conteneur.

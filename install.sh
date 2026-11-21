@@ -17,7 +17,7 @@ set -Eeuo pipefail
 umask 027
 
 LOGIT_REPO="https://github.com/KyoshiroFR/logit.git"
-LOGIT_DEFAULT_REF="correctifs-installation"  # branche de test ; passera au tag lors de la publication
+LOGIT_DEFAULT_REF="amelioration-design"  # branche de test ; passera au tag lors de la publication
 # Empreinte Git du commit de la version : renseignée lors de la publication d'une version.
 LOGIT_DEFAULT_COMMIT=""
 
@@ -328,6 +328,8 @@ ok "Secrets aléatoires écrits dans $DIR/.env (root uniquement)"
 
 # --- 8. Construction et démarrage ---------------------------------------------------------
 step "Construction et démarrage (quelques minutes la première fois)"
+# Journal des échecs de connexion, écrit par l'application (uid 10001) et lu par fail2ban.
+install -d -m 750 -o 10001 -g 10001 /var/log/logit
 compose build --pull >>"$LOG" 2>&1 || fail "la construction de l’image a échoué."
 show_logs() {  # affiche la cause d'un échec de démarrage, sans secret (les journaux n'en contiennent pas)
     printf '\n%sDerniers messages des services :%s\n' "$D" "$N" >&2
@@ -501,6 +503,9 @@ EOF
 chmod 644 /etc/cron.d/logit
 if logit backup --quiet; then ok "Commande « logit » installée, première sauvegarde faite, sauvegarde chaque nuit à 2 h 17"
 else warn "Première sauvegarde impossible : vérifie « logit backup »."; fi
+
+# fail2ban : installé s'il manque, puis règle « logit » (bannissement des IP après 5 échecs en 15 minutes).
+logit fail2ban || warn "fail2ban non configuré : corrige la cause indiquée puis relance « logit fail2ban ». En attendant, LogIT bloque lui-même une IP au-delà de 10 échecs."
 
 date -Iseconds >"$DIR/.installed"
 

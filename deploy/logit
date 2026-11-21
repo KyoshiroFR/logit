@@ -35,6 +35,94 @@ journal() {  # journal <action> <détails JSON> : trace l'opération dans le jou
     manage audit_event "$1" --target "$(hostname -s 2>/dev/null || echo serveur)" --details "$2" >/dev/null 2>&1 || true
 }
 
+# --- fail2ban : bannit au pare-feu les IP qui échouent trop souvent à se connecter --------------
+SECURITY_LOG_DIR=/var/log/logit   # monté dans le conteneur app (compose.yaml), écrit par l'uid 10001
+F2B_MARK="# LogIT — ajouté par l'installateur (logit fail2ban). Ne pas modifier : réécrit à chaque mise à jour."
+F2B_FILTER=/etc/fail2ban/filter.d/logit.conf
+F2B_JAIL=/etc/fail2ban/jail.d/logit.local
+F2B_ROTATE=/etc/logrotate.d/logit-securite
+
+prepare_security_log() {  # avant tout démarrage : sinon Docker crée le dossier pour root et l'application ne peut pas écrire
+    install -d -m 750 -o 10001 -g 10001 "$SECURITY_LOG_DIR"
+}
+
+ours_or_absent() { [[ ! -e $1 ]] || grep -qF "$F2B_MARK" "$1"; }
+
+setup_fail2ban() {  # idempotent ; renvoie 1 (sans rien laisser de cassé) si fail2ban ne peut pas être configuré
+    prepare_security_log
+    if ! command -v systemctl >/dev/null || [[ ! -d /run/systemd/system ]]; then
+        printf '    %s!%s fail2ban non configuré : systemd absent (WSL ?).\n' "$Y" "$N"; return 1
+    fi
+    if ! command -v fail2ban-client >/dev/null; then
+        apt-get update -qq >>"$LOG" 2>&1 || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends fail2ban python3-systemd >>"$LOG" 2>&1 \
+            || { printf '    %s!%s Installation de fail2ban impossible (voir %s).\n' "$Y" "$N" "$LOG"; return 1; }
+    fi
+    local f
+    for f in "$F2B_FILTER" "$F2B_JAIL" "$F2B_ROTATE"; do
+        ours_or_absent "$f" || { printf '    %s!%s %s existe déjà et n’a pas été créé par LogIT : laissé tel quel.\n' "$Y" "$N" "$f"; return 1; }
+    done
+    # Caddy intégré : les ports sont publiés par Docker, le trafic traverse le noyau en « forward » vers
+    # le conteneur (ports 80/443 du conteneur). Derrière le proxy du serveur : trafic « input », ports publics.
+    local hook=input ports
+    ports="$(env_value LOGIT_HTTP_PORT),$(env_value LOGIT_PUBLIC_PORT)"
+    if [[ $(env_value LOGIT_MODE) == caddy ]]; then hook=forward; ports="80,443"; fi
+    [[ $ports =~ ^[0-9]+,[0-9]+$ ]] || ports="80,443"
+    local backup; backup=$(mktemp -d)
+    for f in "$F2B_FILTER" "$F2B_JAIL" "$F2B_ROTATE"; do [[ -e $f ]] && cp -p "$f" "$backup/"; done
+    cat >"$F2B_FILTER" <<EOF
+$F2B_MARK
+# Lignes écrites par LogIT : « 2026-01-31 08:00:00 LogIT échec de connexion ip=192.0.2.10 motif=mot-de-passe » (heure UTC).
+[Definition]
+datepattern = ^%%Y-%%m-%%d %%H:%%M:%%S
+failregex = ^\s*LogIT échec de connexion ip=<ADDR> motif=[a-z-]+$
+ignoreregex =
+EOF
+    cat >"$F2B_JAIL" <<EOF
+$F2B_MARK
+# 5 échecs en 15 minutes depuis une même IP : bannie 15 minutes sur les ports web de LogIT uniquement
+# (jamais SSH). Débloquer : fail2ban-client set logit unbanip <IP>
+[logit]
+enabled     = true
+filter      = logit
+backend     = polling
+logpath     = $SECURITY_LOG_DIR/securite.log
+logtimezone = UTC
+maxretry    = 5
+findtime    = 15m
+bantime     = 15m
+action      = nftables[type=multiport, name=logit, port="$ports", protocol=tcp, chain=f2b-logit, chain_hook=$hook]
+EOF
+    cat >"$F2B_ROTATE" <<EOF
+$F2B_MARK
+$SECURITY_LOG_DIR/securite.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+    chmod 644 "$F2B_FILTER" "$F2B_JAIL" "$F2B_ROTATE"
+    touch "$SECURITY_LOG_DIR/securite.log"; chown 10001:10001 "$SECURITY_LOG_DIR/securite.log"; chmod 640 "$SECURITY_LOG_DIR/securite.log"
+    if fail2ban-client -t >>"$LOG" 2>&1 && systemctl enable --now fail2ban >>"$LOG" 2>&1 \
+        && fail2ban-client reload >>"$LOG" 2>&1 && fail2ban-client status logit >>"$LOG" 2>&1; then
+        rm -rf "$backup"
+        ok "fail2ban : règle « logit » active (ports $ports)"
+        return 0
+    fi
+    # Configuration refusée : retour à l'état d'origine, fail2ban continue comme avant.
+    for f in "$F2B_FILTER" "$F2B_JAIL" "$F2B_ROTATE"; do
+        if [[ -e $backup/$(basename "$f") ]]; then cp -p "$backup/$(basename "$f")" "$f"; else rm -f "$f"; fi
+    done
+    rm -rf "$backup"
+    fail2ban-client reload >>"$LOG" 2>&1 || true
+    printf '    %s!%s fail2ban a refusé la règle LogIT : retirée, fail2ban est resté dans son état d’origine (voir %s).\n' "$Y" "$N" "$LOG"
+    return 1
+}
+
 wait_healthy() {
     local id
     for _ in $(seq 1 "${1:-90}"); do
@@ -165,6 +253,7 @@ update() {
     fi
 
     say "Redémarrage et migrations"
+    prepare_security_log
     if compose up -d >>"$LOG" 2>&1 && wait_healthy 120 && manage verify_chain >>"$LOG" 2>&1; then
         rm -f "$LOGIT_DIR/.env.avant-maj"
         install -m 0755 "$LOGIT_DIR/deploy/logit" /usr/local/bin/logit.new
@@ -178,6 +267,8 @@ update() {
         done < <(docker image ls logit --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -v ':<none>$' || true)
         journal version_updated "{\"de\": \"$current_ref\", \"vers\": \"$target\", \"commit\": \"$new_commit\", \"images\": \"${changed[*]}\", \"sauvegarde\": \"$dump\"}"
         ok "LogIT est à jour : $target (commit ${new_commit:0:12}). Intégrité vérifiée."
+        say "Protection fail2ban"
+        setup_fail2ban || true  # un échec de fail2ban n'annule pas une mise à jour réussie ; LogIT bloque lui-même en dernier recours
         return 0
     fi
 
@@ -222,6 +313,7 @@ case "${1:-help}" in
         ;;
     update) shift; update "$@" ;;
     verify) manage verify_chain ;;
+    fail2ban) LOGGING=1; say "Protection fail2ban"; setup_fail2ban ;;
     ca)
         if [[ $(env_value LOGIT_MODE) == caddy ]]; then
             compose exec -T proxy cat /data/caddy/pki/authorities/local/root.crt
@@ -241,6 +333,7 @@ Usage : logit <commande>
                       sauvegarde, construction, migrations, contrôle d'intégrité,
                       et retour automatique à la version précédente en cas d'échec
   verify              vérifie la chaîne d'empreintes des fiches et du journal
+  fail2ban            installe fail2ban si besoin et (re)pose la règle « logit »
   ca                  affiche le certificat à importer sur les postes
 EOF
         ;;
