@@ -95,7 +95,7 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
   - la ligne `listen [::]` de nginx n'est écrite que si IPv6 est actif ;
   - un site ajouté à nginx, Apache ou Caddy est retiré si le proxy refuse la configuration ;
   - une installation sans marqueur `.installed` est jugée vide et refaite ; avec le marqueur, elle n'est jamais effacée ;
-  - installation automatisée : aucune question, HTTPS sur le port 6720 seulement ; si le port est pris, arrêt avant toute modification (pas même les prérequis) ;
+  - installation automatisée : aucune question ; proxy du serveur (nginx, Apache, Caddy) s'il y en a un, sinon Caddy intégré sur 443, ou 6720 si 443 est pris ; si 443 et 6720 sont pris, arrêt avant d'installer quoi que ce soit ;
   - le port 80 du Caddy intégré n'est publié (redirection) que sur 443, par `compose.caddy-http.yaml` ; une installation existante qui l'avait le garde après mise à jour ;
   - `logit update` s'arrête avant toute modification si un port de LogIT est pris par un autre service ;
   - une mise à jour fait une sauvegarde avant, refuse une version plus ancienne et revient automatiquement en arrière (code et base) si le démarrage échoue ;

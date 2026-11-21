@@ -24,7 +24,7 @@ bash -c "$(wget -qO- https://raw.githubusercontent.com/KyoshiroFR/logit/main/ins
 
 L’installateur demande d’abord :
 
-1. **Installation automatisée** (conseillée) : aucune question. LogIT tourne seul, en HTTPS sur le port **6720** (`https://serveur:6720/`), sans dépendre des autres services du serveur ni de ses ports 80/443. Si le port 6720 est déjà pris, l’installateur s’arrête avant de rien modifier.
+1. **Installation automatisée** (conseillée) : aucune question. Si nginx, Apache ou Caddy est déjà installé sur le serveur (ports 80/443), LogIT s’y ajoute comme site, sans toucher aux autres sites. Sinon, LogIT installe son propre Caddy, en HTTPS sur le port **443** s’il est libre, ou sur le port **6720** si un autre service occupe le 443 (`https://serveur:6720/`). Si 443 et 6720 sont tous deux pris, l’installateur s’arrête avant de rien installer. Les adresses d’accès sont celles détectées (IP et nom de la machine) : pour un nom de domaine, choisis l’installation manuelle.
 2. **Installation manuelle** : il demande les adresses d’accès, puis le port HTTPS (6720 par défaut, ou 443) ou le branchement sur le nginx, l’Apache ou le Caddy déjà présent sur le serveur (adresse sans port, certificat Let’s Encrypt possible).
 
 LogIT ne sert que du HTTPS. Le port 80 n’est utilisé (pour rediriger vers HTTPS) que si LogIT est sur le port 443.
@@ -38,11 +38,11 @@ Il analyse le serveur et s’adapte :
 | Docker absent | installe Docker Engine et Compose depuis le dépôt officiel Docker |
 | un paquet non officiel (`docker.io`…) | s’arrête et indique quoi retirer |
 | pas de synchronisation horaire | installe et active `systemd-timesyncd` (les horodatages en dépendent) |
-| installation automatisée | déploie son propre Caddy en HTTPS sur le port 6720 |
-| **nginx** sur 80/443 (installation manuelle) | ajoute un site `logit.conf`, teste (`nginx -t`) puis recharge, sans toucher aux autres sites |
-| **Apache** sur 80/443 (installation manuelle) | ajoute un site, active les modules nécessaires, teste puis recharge |
-| **Caddy** (système, installation manuelle) | ajoute un fichier importé, sauvegarde le Caddyfile d’origine, valide puis recharge |
-| un autre service sur 80/443 (installation manuelle) | propose de faire écouter LogIT en local et t’indique la route à ajouter dans ton proxy |
+| aucun reverse proxy | déploie son propre Caddy en HTTPS, sur 443 s’il est libre, sinon sur 6720 |
+| **nginx** sur 80/443 | ajoute un site `logit.conf`, teste (`nginx -t`) puis recharge, sans toucher aux autres sites |
+| **Apache** sur 80/443 | ajoute un site, active les modules nécessaires, teste puis recharge |
+| **Caddy** (système) | ajoute un fichier importé, sauvegarde le Caddyfile d’origine, valide puis recharge |
+| un autre service sur 80/443 | installation automatisée : Caddy intégré sur 6720 ; manuelle : propose aussi de faire écouter LogIT en local et t’indique la route à ajouter dans ton proxy |
 | un pare-feu ufw actif | t’indique la règle à ajouter (il ne modifie pas tes règles) |
 | LogIT déjà installé et à jour | ne modifie rien |
 | LogIT déjà installé, version plus ancienne | le met à jour (voir « Mise à jour ») |
