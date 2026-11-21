@@ -210,8 +210,8 @@ update() {
         while read -r old; do
             [[ $old == "$new_image" || $old == "$current_image" ]] && continue
             engine rmi "$old" >>"$LOG" 2>&1 && log_line "    image supprimée : $old" || true
-        # podman préfixe les images construites localement par « localhost/ » : on compare sans ce préfixe.
-        done < <(engine image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | sed 's#^localhost/##' | grep '^logit:' | grep -v ':<none>$' || true)
+        # podman nomme les images construites « docker.io/library/logit » ou « localhost/logit » : on compare sans préfixe.
+        done < <(engine image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | sed -E 's#^(localhost|docker\.io/library)/##' | grep '^logit:' | grep -v ':<none>$' || true)
         journal version_updated "{\"de\": \"$current_ref\", \"vers\": \"$target\", \"commit\": \"$new_commit\", \"images\": \"${changed[*]}\", \"sauvegarde\": \"$dump\"}"
         ok "LogIT est à jour : $target (commit ${new_commit:0:12}). Intégrité vérifiée."
         return 0

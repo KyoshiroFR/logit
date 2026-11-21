@@ -35,8 +35,10 @@ Il analyse le serveur et s’adapte :
 
 | Il trouve… | Il fait… |
 |---|---|
-| Docker absent | installe Docker Engine et Compose depuis le dépôt officiel Docker |
-| un paquet non officiel (`docker.io`…) | s’arrête et indique quoi retirer |
+| Docker présent | l’utilise |
+| **podman** présent (sans Docker) | l’utilise, sans installer Docker à côté : active `podman.socket` et `podman-restart`, ajoute seulement l’outil Compose (paquet `docker-compose-plugin`, sans le moteur Docker) ; les autres conteneurs podman ne sont pas touchés |
+| ni Docker ni podman | installe Docker Engine et Compose depuis le dépôt officiel Docker |
+| un paquet non officiel (`docker.io`, `runc`…) sans podman | s’arrête et indique comment vérifier puis quoi retirer |
 | pas de synchronisation horaire | installe et active `systemd-timesyncd` (les horodatages en dépendent) |
 | aucun reverse proxy | installation automatisée : installe Caddy ; manuelle : Caddy intégré sur le port choisi |
 | **nginx** sur 80/443 | ajoute un site `logit.conf`, teste (`nginx -t`) puis recharge, sans toucher aux autres sites |

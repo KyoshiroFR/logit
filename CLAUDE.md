@@ -48,6 +48,7 @@ La CI GitHub (`.github/workflows/ci.yml`) relance ces contrôles à chaque envoi
   - `permissions.py` : rôles admin (`is_superuser`), groupes « Contributeur » et « Lecteur ».
   - `security.py` : CSP stricte, verrouillage, TOTP. `bugs.py` : signalements (`BugReport`, table modifiable, pas une trace).
   - `management/commands/` : `secure_db` (droits PostgreSQL), `verify_chain`, `audit_event`, `bootstrap_admin`.
+- Moteur de conteneurs : Docker, ou podman s'il est déjà installé (`LOGIT_ENGINE` dans `.env` ; Compose pilote podman par `podman.socket`, construction classique, jamais de BuildKit). Toute commande de conteneur passe par `engine()` / `compose()` dans `install.sh` et `deploy/logit`.
 - `deploy/` : `compose.yaml` (db, migrate à usage unique, app), `compose.caddy.yaml` (Caddy intégré) ou `compose.port.yaml` (derrière le proxy du serveur), `entrypoint.sh`, et `logit` (commande d'exploitation installée dans `/usr/local/bin`).
 - `install.sh` : installe, ou met à jour si LogIT tourne déjà (il lance alors `logit update` de la version cible). Installation neuve : 1. automatisée (seul le domaine est demandé ; LogIT sur 127.0.0.1:6720 derrière le proxy du serveur, ou Caddy installé s'il n'y en a pas ; certificat Let's Encrypt automatique) ou 2. manuelle (adresses, port, ou proxy du serveur).
 
