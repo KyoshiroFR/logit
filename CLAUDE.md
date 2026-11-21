@@ -55,6 +55,6 @@ Scripts shell : `bash -n` et `shellcheck` sur `install.sh` et `deploy/logit`.
 - **Toute nouvelle table de traces** reçoit les déclencheurs (migration `RunSQL`) **et** figure dans `APPEND_ONLY` de `secure_db.py`. Une migration ajoute des colonnes, elle ne réécrit pas les lignes des tables de traces.
 - **Ne jamais changer le calcul d'empreinte des champs existants** (`Version.payload`, `AuditEvent.payload`). Une nouvelle clé s'ajoute seulement si elle est renseignée (comme `attachments`, `category`, `rollback_of`), sinon toutes les fiches existantes deviennent « altérées ».
 - **Le mot de passe propriétaire PostgreSQL n'est jamais dans le conteneur `app`** : seul le service `migrate` le reçoit.
-- **CSP** : aucun script ni style en ligne, aucun attribut `style=""` dans les gabarits (un test le vérifie). Icônes en SVG dans la page.
+- **CSP** : aucun script ni style en ligne, aucun attribut `style=""` dans les gabarits (vérifié par `test_aucun_style_ni_script_en_ligne_dans_les_gabarits`). Icônes en SVG dans la page.
 - **Une mise à jour ne perd jamais de données** : sauvegarde avant, retour automatique (code, `.env`, base) en cas d'échec.
 - `install.sh` : `LOGIT_DEFAULT_REF` pointe sur la branche elle-même pendant les tests, sur le tag à la publication ; `LOGIT_DEFAULT_COMMIT` reçoit l'empreinte du commit du tag dans un commit suivant sur `main`.

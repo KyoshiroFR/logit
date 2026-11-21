@@ -54,6 +54,7 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
 | Le dernier administrateur actif ne peut pas perdre son rôle. | `AuthenticationTests.test_dernier_admin_protege` |
 | En-têtes de sécurité (CSP, `X-Frame-Options`), redirection HTTPS, `/sante/` accessible. | `AuthenticationTests.test_en_tetes_de_securite_et_sante` |
 | CSP stricte : `script-src 'self'`, `style-src 'self'`, jamais `unsafe-inline`. | `InterfaceTests.test_csp_stricte_conservee` |
+| Aucun style ni script en ligne dans les gabarits (attribut `style`, balise `<style>`, `<script>` sans `src`, gestionnaire `on…=`) : la CSP les bloquerait sans erreur visible. | `InterfaceTests.test_aucun_style_ni_script_en_ligne_dans_les_gabarits` |
 
 ## Registre et interface
 
@@ -82,7 +83,6 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
 
 À vérifier à la main quand on modifie le code concerné.
 
-- **Aucun attribut `style=""` dans les gabarits.** La CSP l'interdit, mais le test ne contrôle que l'en-tête : un `style=""` serait seulement ignoré par le navigateur, sans erreur. Contrôle : `grep -rn 'style=' src/journal/templates` doit être vide.
 - **Interactions JavaScript** (`logit.js`) : menu repliable de la barre du haut, indicateurs glissants, apparition progressive, compteurs des chiffres clés, filtrage sans rechargement, raccourci `/`, collage de capture avec Ctrl+V, fenêtre de signalement, état « Vérification… » de la page Intégrité. Tout doit aussi fonctionner sans JavaScript.
 - **Code TOTP en 6 cases** : le vrai champ reste le seul à recevoir la saisie (collage, remplissage automatique) ; il redevient un champ normal pour un code de secours ; un code complet est envoyé seul, mais jamais au rechargement après un code refusé (sinon envoi en boucle et verrouillage du compte).
 - **`prefers-reduced-motion`** coupe toutes les animations (fin de `logit.css`).

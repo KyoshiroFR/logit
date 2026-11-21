@@ -491,6 +491,18 @@ class InterfaceTests(Base):
         self.assertIn("style-src 'self'", csp)
         self.assertNotIn("unsafe-inline", csp)
 
+    def test_aucun_style_ni_script_en_ligne_dans_les_gabarits(self):
+        # La CSP les bloquerait sans erreur visible : ils doivent aller dans logit.css et logit.js.
+        import re
+        from pathlib import Path
+        interdits = {"attribut style": r"\sstyle\s*=", "balise <style>": r"<style", "script en ligne": r"<script(?![^>]*\ssrc=)",
+                     "gestionnaire on…=": r"\son[a-z]+\s*="}
+        gabarits = sorted((Path(__file__).parent / "templates").rglob("*.html"))
+        self.assertGreater(len(gabarits), 20)
+        trouves = [f"{g.name} : {nom}" for g in gabarits for nom, motif in interdits.items()
+                   if re.search(motif, g.read_text(encoding="utf-8"), re.IGNORECASE)]
+        self.assertEqual(trouves, [])
+
 
 # --- 2.3 : signaler un bug ----------------------------------------------------------------
 
