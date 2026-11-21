@@ -55,6 +55,9 @@ backup() {  # affiche le chemin de la sauvegarde
     install -d -m 700 "$BACKUP_DIR"
     local file
     file="$BACKUP_DIR/logit-$(date +%Y%m%d-%H%M%S).dump"
+    while [[ -e $file || -e $file.part ]]; do  # jamais écraser une sauvegarde existante
+        sleep 1; file="$BACKUP_DIR/logit-$(date +%Y%m%d-%H%M%S).dump"
+    done
     compose exec -T db pg_dump -U logit_owner -d logit --format=custom >"$file.part"
     mv "$file.part" "$file"; chmod 600 "$file"
     find "$BACKUP_DIR" -name 'logit-*.dump' -mtime +"$RETENTION_DAYS" -delete
@@ -144,6 +147,9 @@ update() {
     # Une image par construction (commit + date) : celle d'avant reste intacte pour le retour automatique.
     local new_image
     new_image="logit:${new_commit:0:12}-$(date +%Y%m%d%H%M%S)"
+    while [[ $new_image == "$current_image" || -n $(image_id "$new_image") ]]; do  # jamais réutiliser un nom d'image
+        sleep 1; new_image="logit:${new_commit:0:12}-$(date +%Y%m%d%H%M%S)"
+    done
     env_set LOGIT_VERSION "$target"; env_set LOGIT_COMMIT "$new_commit"
     env_set LOGIT_IMAGE "$new_image"; env_set LOGIT_IMAGE_PRECEDENTE "$current_image"
 

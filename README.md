@@ -82,11 +82,15 @@ sudo logit update            # dernière version publiée
 sudo logit update v0.1.1     # une version précise
 ```
 
-Dans l’ordre : sauvegarde de la base, récupération du code, construction de l’image, redémarrage avec les migrations, puis contrôle de santé et d’intégrité.
+Dans l’ordre : contrôle de l’espace disque, téléchargement des correctifs des images de base (PostgreSQL, Caddy, Python), sauvegarde de la base, récupération du code, construction de l’image, redémarrage avec les migrations, puis contrôle de santé et d’intégrité.
+- Les correctifs de sécurité des images sont appliqués même sans nouvelle version de LogIT : relancer la commande suffit. Si rien n’a changé, elle répond « Déjà à jour » sans rien toucher.
+- S’il manque de la place (3 Go pour Docker, et de quoi faire la sauvegarde), rien n’est modifié.
 - Si la construction échoue, rien n’est modifié.
+- Chaque construction a sa propre image. L’image en service et la précédente sont conservées pour le retour arrière ; les plus anciennes sont supprimées.
 - Si le démarrage ou le contrôle d’intégrité échoue, LogIT revient **automatiquement** à la version précédente, avec la base restaurée depuis la sauvegarde faite juste avant.
 - Un retour à une version plus ancienne est refusé : les migrations de base ne se défont pas. On passe alors par `logit restore`.
 - Chaque mise à jour, réussie ou annulée, est inscrite dans le journal de sécurité.
+- Le détail de chaque installation et mise à jour est ajouté à `/var/log/logit-install.log`, sans effacer les précédentes.
 
 
 ## Fonctionnement
