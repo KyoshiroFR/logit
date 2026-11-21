@@ -269,7 +269,7 @@ elif [[ $INSTALL_KIND == auto ]]; then
     MODE=caddy                              # automatisée : toujours le port HTTPS dédié
 else
     MODE=caddy
-    info "1. Port HTTPS dédié : LogIT indépendant des autres services (Caddy intégré)"
+    [[ -z ${L443:-$L80} ]] || info "1. Port HTTPS dédié : LogIT indépendant des autres services (Caddy intégré)"
     if [[ -n $host_proxy ]]; then
         info "2. Via $host_label, déjà sur 80/443 : adresse sans port, sans toucher aux autres sites"
     elif [[ -n ${L443:-$L80} ]]; then

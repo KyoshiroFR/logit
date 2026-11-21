@@ -95,6 +95,9 @@ Les comportements de la dernière section ne sont couverts par aucun test : à v
   - la ligne `listen [::]` de nginx n'est écrite que si IPv6 est actif ;
   - un site ajouté à nginx, Apache ou Caddy est retiré si le proxy refuse la configuration ;
   - une installation sans marqueur `.installed` est jugée vide et refaite ; avec le marqueur, elle n'est jamais effacée ;
+  - installation automatisée : aucune question, HTTPS sur le port 6720 seulement ; si le port est pris, arrêt avant toute modification (pas même les prérequis) ;
+  - le port 80 du Caddy intégré n'est publié (redirection) que sur 443, par `compose.caddy-http.yaml` ; une installation existante qui l'avait le garde après mise à jour ;
+  - `logit update` s'arrête avant toute modification si un port de LogIT est pris par un autre service ;
   - une mise à jour fait une sauvegarde avant, refuse une version plus ancienne et revient automatiquement en arrière (code et base) si le démarrage échoue ;
   - sur une branche de test, `LOGIT_DEFAULT_REF` pointe sur la branche elle-même ;
   - pas de `docker compose up --wait` : `migrate` est à usage unique, on attend l'état « healthy » de `app`.
