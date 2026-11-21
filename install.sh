@@ -154,14 +154,15 @@ fi
 [[ ! -e $DIR ]] || fail "$DIR existe déjà sans installation LogIT. Choisis un autre dossier avec LOGIT_INSTALL_DIR."
 
 # --- Type d'installation (installation neuve) ---------------------------------------------
-# 1. automatisée : aucune question. LogIT se branche sur le nginx, l'Apache ou le Caddy du serveur s'il y en a un ;
-#    sinon il installe son propre Caddy, en HTTPS sur 443 si le port est libre, sur 6720 sinon ;
+# 1. automatisée : une seule question, le nom de domaine. LogIT écoute en local sur 127.0.0.1:6720 ; le reverse proxy
+#    du serveur (nginx, Apache ou Caddy), ou Caddy installé s'il n'y en a pas, sert ce domaine en HTTPS avec un
+#    certificat Let's Encrypt et ne transmet à LogIT que les requêtes pour ce domaine ;
 # 2. manuelle : adresses, port, ou branchement sur le reverse proxy du serveur.
 HTTPS_PORT_DEFAULT=6720
 INSTALL_KIND=auto
 if [[ $ASSUME_YES != 1 && -t 0 ]]; then
     step "Type d’installation"
-    info "1. Automatisée : aucune question ; se branche sur le reverse proxy du serveur s’il y en a un, sinon installe le sien (conseillé)"
+    info "1. Automatisée : seul le nom de domaine est demandé ; reverse proxy et certificat configurés automatiquement (conseillé)"
     info "2. Manuelle : adresses d’accès, port, ou branchement sur le reverse proxy du serveur"
     ask "Ton choix (1 ou 2)" "1"
     case $REPLY in
@@ -181,10 +182,21 @@ case "${L443:-$L80}" in
     apache2*|httpd*) command -v a2ensite >/dev/null && { host_proxy=apache; host_label="Apache"; } ;;
     caddy*) [[ -f /etc/caddy/Caddyfile ]] && command -v caddy >/dev/null && { host_proxy=host-caddy; host_label="Caddy (système)"; } ;;
 esac
-# Automatisée sans proxy reconnu, 443 pris par un autre service : port 6720. S'il est pris aussi,
-# on s'arrête avant d'installer quoi que ce soit (prérequis, Docker).
-if [[ $INSTALL_KIND == auto && $PROXY_CHOICE == auto && -z $host_proxy && -n $L443 ]] && port_used "$HTTPS_PORT_DEFAULT"; then
-    fail "les ports 443 ($L443) et $HTTPS_PORT_DEFAULT ($(listener_of "$HTTPS_PORT_DEFAULT" || true)) sont déjà utilisés. Relance en installation manuelle pour choisir un autre port. Rien n’a été modifié."
+# Installation automatisée : contrôles et nom de domaine avant d'installer quoi que ce soit (prérequis, Docker).
+DOMAIN=""
+if [[ $INSTALL_KIND == auto && $PROXY_CHOICE == auto ]]; then
+    if [[ -z $host_proxy && -n ${L443:-$L80} ]]; then
+        fail "un service non reconnu occupe les ports 80/443 (${L443:-$L80}) : l’installation automatisée ne sait pas le configurer. Relance en installation manuelle. Rien n’a été modifié."
+    fi
+    port_used "$HTTPS_PORT_DEFAULT" && fail "le port local $HTTPS_PORT_DEFAULT est déjà utilisé ($(listener_of "$HTTPS_PORT_DEFAULT" || true)). Relance en installation manuelle. Rien n’a été modifié."
+    DOMAIN=${LOGIT_INSTALL_HOSTS:-}; DOMAIN=${DOMAIN%% *}
+    if [[ -z $DOMAIN ]]; then
+        [[ -t 0 ]] || fail "nom de domaine manquant : indique-le avec LOGIT_INSTALL_HOSTS, ou lance l’installation dans un terminal."
+        read -r -p "    Nom de domaine de LogIT (ex. logit.exemple.fr) : " DOMAIN || true
+    fi
+    DOMAIN=$(tr '[:upper:]' '[:lower:]' <<<"$DOMAIN" | xargs)
+    [[ $DOMAIN =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$ ]] || fail "nom de domaine invalide : « $DOMAIN » (exemple : logit.exemple.fr)."
+    ok "Domaine : $DOMAIN ($([[ -n $host_proxy ]] && echo "via $host_label, déjà installé" || echo "Caddy sera installé"))"
 fi
 
 # --- 3. Prérequis -------------------------------------------------------------------------
@@ -254,6 +266,7 @@ IP=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' 
 FQDN=$(hostname -f 2>/dev/null || true); SHORT=$(hostname -s 2>/dev/null || true)
 DEFAULT_HOSTS=$(printf '%s\n' "$IP" "$FQDN" "$SHORT" | awk 'NF && $0 != "localhost" && !seen[$0]++' | paste -sd ' ')
 HOSTS=${LOGIT_INSTALL_HOSTS:-}
+[[ -z $DOMAIN ]] || HOSTS=$DOMAIN   # automatisée : le domaine seul, le proxy ne sert que lui
 if [[ -z $HOSTS ]]; then
     info "Détectées : ${DEFAULT_HOSTS:-aucune}"
     ask "Adresses par lesquelles l’équipe joindra LogIT (espaces)" "${DEFAULT_HOSTS:-localhost}"
@@ -270,7 +283,7 @@ step "Exposition"
 if [[ $PROXY_CHOICE != auto ]]; then
     MODE=$PROXY_CHOICE                      # imposé par LOGIT_INSTALL_PROXY
 elif [[ $INSTALL_KIND == auto ]]; then
-    MODE=${host_proxy:-caddy}               # automatisée : le proxy du serveur s'il y en a un, sinon Caddy intégré
+    MODE=${host_proxy:-host-caddy}          # automatisée : le proxy du serveur, sinon Caddy (installé à l'étape 9)
 else
     MODE=caddy
     [[ -z ${L443:-$L80} ]] || info "1. Port HTTPS dédié : LogIT indépendant des autres services (Caddy intégré)"
@@ -307,11 +320,13 @@ case $MODE in
         ok "LogIT en HTTPS sur le port $PUBLIC_PORT (Caddy intégré)" ;;
     nginx)      ok "LogIT sera ajouté à nginx comme site, sans toucher aux sites existants" ;;
     apache)     ok "LogIT sera ajouté à Apache comme site, sans toucher aux sites existants" ;;
-    host-caddy) ok "LogIT sera ajouté à Caddy (système) par un fichier importé" ;;
+    host-caddy) if command -v caddy >/dev/null; then ok "LogIT sera ajouté à Caddy (système) par un fichier importé"
+                else ok "Aucun reverse proxy : Caddy sera installé, LogIT y sera ajouté"; fi ;;
     manual)     warn "LogIT écoutera en local, la route sera à ajouter dans ton proxy (${L443:-$L80})." ;;
 esac
 if [[ $MODE != caddy ]]; then
-    APP_PORT=8040; while port_used "$APP_PORT"; do APP_PORT=$((APP_PORT + 1)); done
+    if [[ -n $DOMAIN ]]; then APP_PORT=$HTTPS_PORT_DEFAULT   # automatisée : toujours 127.0.0.1:6720 (vérifié libre plus haut)
+    else APP_PORT=8040; while port_used "$APP_PORT"; do APP_PORT=$((APP_PORT + 1)); done; fi
     info "Application sur 127.0.0.1:$APP_PORT"
 fi
 
@@ -382,6 +397,8 @@ ok "Base, migrations et application démarrées"
 
 # --- 9. Branchement sur le reverse proxy du serveur ----------------------------------------
 TLS_DIR=/etc/logit/tls
+ACME_ROOT=/var/www/logit-acme   # validation Let's Encrypt (certbot --webroot) pour nginx et Apache
+CERT_PUBLIC=0                   # 1 : certificat Let's Encrypt en place (plus d'alerte du navigateur)
 make_certificate() {
     install -d -m 750 "$TLS_DIR"
     local san="" h
@@ -400,6 +417,7 @@ configure_nginx() {
     [[ -d /etc/nginx/sites-available ]] || { conf=/etc/nginx/conf.d/logit.conf; link=""; }
     [[ ! -e $conf ]] || { warn "$conf existe déjà : non modifié."; return 1; }
     make_certificate
+    install -d -m 755 "$ACME_ROOT"
     local v6_80="" v6_443=""
     if [[ -s /proc/net/if_inet6 ]]; then v6_80="listen [::]:80;"; v6_443="listen [::]:443 ssl;"; fi
     cat >"$conf" <<EOF
@@ -408,7 +426,8 @@ server {
     listen 80;
     $v6_80
     server_name $HOSTS;
-    return 308 https://\$host\$request_uri;
+    location ^~ /.well-known/acme-challenge/ { root $ACME_ROOT; default_type text/plain; }  # validation Let's Encrypt
+    location / { return 308 https://\$host\$request_uri; }
 }
 server {
     listen 443 ssl;
@@ -440,6 +459,7 @@ configure_apache() {
     local conf=/etc/apache2/sites-available/logit.conf
     [[ ! -e $conf ]] || { warn "$conf existe déjà : non modifié."; return 1; }
     make_certificate
+    install -d -m 755 "$ACME_ROOT"
     local enabled_mods
     enabled_mods=$(apache2ctl -M 2>/dev/null || true)
     local mods=()
@@ -450,7 +470,12 @@ configure_apache() {
 <VirtualHost *:80>
     ServerName $first
     ${aliases:+ServerAlias$aliases}
+    Alias /.well-known/acme-challenge/ $ACME_ROOT/.well-known/acme-challenge/
+    <Directory $ACME_ROOT>
+        Require all granted
+    </Directory>
     RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
     RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=308,L]
 </VirtualHost>
 <VirtualHost *:443>
@@ -482,10 +507,12 @@ EOF
 configure_host_caddy() {
     local main=/etc/caddy/Caddyfile site=/etc/caddy/logit.caddy backup
     [[ ! -e $site ]] || { warn "$site existe déjà : non modifié."; return 1; }
+    local tls_line="" h
+    for h in $HOSTS; do [[ $h == *.* && ! $h =~ ^[0-9.]+$ ]] || tls_line="tls internal"; done  # IP ou nom local
     cat >"$site" <<EOF
 # LogIT — ajouté par l'installateur.
 ${HOSTS// /, } {
-    tls internal
+    $tls_line
     reverse_proxy 127.0.0.1:$APP_PORT {
         header_up X-Real-IP {remote_host}
     }
@@ -502,12 +529,39 @@ EOF
     return 1
 }
 
+install_caddy() {  # aucun reverse proxy : Caddy (paquet Debian), dont le Caddyfile n'importe que les sites ajoutés
+    apt_install caddy || return 1
+    printf '# Caddy installé par LogIT : chaque site est dans un fichier importé ci-dessous.\n' >/etc/caddy/Caddyfile
+    systemctl enable --now caddy >>"$LOG" 2>&1 || return 1
+    ok "Caddy installé (aucun reverse proxy n’était présent)"
+}
+
+obtain_certificate() {  # obtain_certificate nginx|apache : certificat Let's Encrypt pour $DOMAIN, renouvelé par certbot
+    local unit=$1 conf test live=/etc/letsencrypt/live/$DOMAIN
+    if [[ $1 == nginx ]]; then conf=/etc/nginx/sites-available/logit.conf; [[ -e $conf ]] || conf=/etc/nginx/conf.d/logit.conf; test="nginx -t"
+    else conf=/etc/apache2/sites-available/logit.conf; unit=apache2; test="apache2ctl configtest"; fi
+    command -v certbot >/dev/null || apt_install certbot || true
+    if command -v certbot >/dev/null && certbot certonly --webroot -w "$ACME_ROOT" -d "$DOMAIN" --non-interactive --agree-tos \
+            --register-unsafely-without-email --keep-until-expiring --deploy-hook "systemctl reload $unit" >>"$LOG" 2>&1; then
+        cp -p "$conf" "$conf.avant-certificat"
+        sed -i "s|$TLS_DIR/logit.crt|$live/fullchain.pem|; s|$TLS_DIR/logit.key|$live/privkey.pem|" "$conf"
+        if $test >>"$LOG" 2>&1 && systemctl reload "$unit" >>"$LOG" 2>&1; then
+            rm -f "$conf.avant-certificat"; CERT_PUBLIC=1; ok "Certificat Let’s Encrypt pour $DOMAIN (renouvelé automatiquement)"; return 0
+        fi
+        mv -f "$conf.avant-certificat" "$conf"; systemctl reload "$unit" >>"$LOG" 2>&1 || true
+    fi
+    warn "Certificat Let’s Encrypt non obtenu pour $DOMAIN : le domaine doit pointer vers ce serveur et le port 80 être joignable depuis Internet. Certificat auto-signé en attendant ; pour réessayer : certbot certonly --webroot -w $ACME_ROOT -d $DOMAIN --deploy-hook \"systemctl reload $unit\", puis remplace dans $conf les chemins $TLS_DIR/logit.crt et .key par $live/fullchain.pem et privkey.pem."
+}
+
 if [[ $MODE != caddy ]]; then
     step "Branchement sur le reverse proxy ($MODE)"
+    if [[ $MODE == host-caddy ]] && ! command -v caddy >/dev/null; then install_caddy || { warn "Installation de Caddy impossible (voir $LOG)."; MODE=manual; }; fi
     case $MODE in
-        nginx) configure_nginx && ok "Site LogIT ajouté à nginx" || MODE=manual ;;
-        apache) configure_apache && ok "Site LogIT ajouté à Apache" || MODE=manual ;;
-        host-caddy) configure_host_caddy && ok "Site LogIT ajouté à Caddy" || MODE=manual ;;
+        nginx) if configure_nginx; then ok "Site LogIT ajouté à nginx"; [[ -z $DOMAIN ]] || obtain_certificate nginx; else MODE=manual; fi ;;
+        apache) if configure_apache; then ok "Site LogIT ajouté à Apache"; [[ -z $DOMAIN ]] || obtain_certificate apache; else MODE=manual; fi ;;
+        host-caddy) if configure_host_caddy; then ok "Site LogIT ajouté à Caddy"
+                        [[ -z $DOMAIN ]] || info "Caddy obtient et renouvelle lui-même le certificat Let’s Encrypt de $DOMAIN (le domaine doit pointer vers ce serveur)."
+                    else MODE=manual; fi ;;
     esac
     sed -i "s/^LOGIT_MODE=.*/LOGIT_MODE=$MODE/" "$DIR/.env"
     if [[ $MODE == manual ]]; then
@@ -576,7 +630,7 @@ ${B}└────────────────────────�
   Le mot de passe administrateur ne sera plus jamais affiché : il n’est stocké nulle part en clair.
   Les autres secrets restent dans $DIR/.env (root uniquement), nécessaire pour restaurer une sauvegarde.
 EOF
-if [[ $MODE == caddy || -f $TLS_DIR/logit.crt ]]; then
+if [[ $MODE == caddy || ( -f $TLS_DIR/logit.crt && $CERT_PUBLIC == 0 ) ]]; then
     printf '\n  Certificat : auto-signé. Pour éviter l’alerte du navigateur, importe sur les postes : '
     [[ $MODE == caddy ]] && printf 'logit ca > logit-ca.crt\n' || printf '%s\n' "$TLS_DIR/logit.crt"
 fi
