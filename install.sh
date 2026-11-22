@@ -17,7 +17,7 @@ set -Eeuo pipefail
 umask 027
 
 LOGIT_REPO="https://github.com/KyoshiroFR/logit.git"
-LOGIT_DEFAULT_REF="v0.2.0"
+LOGIT_DEFAULT_REF="main"  # dernière version de main ; passera au tag (v0.2.0) dès que le tag sera publié
 # Empreinte Git du commit de la version : renseignée lors de la publication d'une version.
 LOGIT_DEFAULT_COMMIT=""
 
