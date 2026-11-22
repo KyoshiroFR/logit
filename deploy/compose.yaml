@@ -13,9 +13,16 @@ x-app-env: &app-env
   LOGIT_DB_APP_USER: logit_app
   LOGIT_DB_APP_PASSWORD: ${LOGIT_DB_APP_PASSWORD:?}
 
+# Journaux des conteneurs limités : 3 fichiers de 10 Mo par service avec Docker (podman applique la taille, sans
+# garder d'anciens fichiers). Sans limite, Docker les garde tous et le disque du serveur finit par se remplir.
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
 services:
   db:
     image: docker.io/library/postgres:17-alpine
+    logging: *logging
     restart: ${LOGIT_RESTART:-unless-stopped}
     environment:
       POSTGRES_DB: logit
@@ -34,6 +41,7 @@ services:
 
   migrate:
     image: ${LOGIT_IMAGE:-logit:local}
+    logging: *logging
     build: ..
     command: migrate
     restart: "no"
@@ -48,6 +56,7 @@ services:
 
   app:
     image: ${LOGIT_IMAGE:-logit:local}
+    logging: *logging
     restart: ${LOGIT_RESTART:-unless-stopped}  # « always » avec podman : seul ce cas est relancé au démarrage du serveur
     # Contrôle de santé explicite : podman construit au format OCI, qui ignore le HEALTHCHECK du Dockerfile.
     healthcheck:

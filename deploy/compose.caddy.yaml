@@ -1,6 +1,9 @@
 services:
   proxy:
     image: docker.io/library/caddy:2-alpine
+    logging:  # même limite que les autres services (voir compose.yaml)
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
     restart: ${LOGIT_RESTART:-unless-stopped}
     depends_on:
       app: {condition: service_healthy}
